@@ -59,11 +59,13 @@ datasource db {
       id          Int      @id @default(autoincrement())
       creatorId   Int
       title       String
+      description String
       date        DateTime
       location    String
       priceRub    Float
       priceKur    Float
       seats       Int
+      imageId     String?
       createdAt   DateTime @default(now())
 
       creator     User     @relation(fields: [creatorId], references: [id])

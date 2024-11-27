@@ -1,31 +1,58 @@
 const { PrismaClient } = require('@prisma/client');
-    const { updateUserBalance } = require('../models/user');
-    const { sendMessageToUser } = require('../utils/telegram');
-    const prisma = new PrismaClient();
+const { generatePaymentUrl } = require('../services/robokassa');
+const prisma = new PrismaClient();
 
-    module.exports = async (ctx) => {
-      const productId = parseInt(ctx.match[1], 10);
-      const userId = ctx.from.id;
-      const user = await prisma.user.findUnique({ where: { telegramId: userId } });
-      const product = await prisma.product.findUnique({ where: { id: productId } });
+module.exports = async (ctx) => {
+  try {
+    // Получаем ID товара из callback_data
+    const productId = parseInt(ctx.callbackQuery.data.split('_')[3]);
+    const userId = ctx.from.id;
 
-      if (product && user.balance >= product.priceKur) {
-        // Deduct kurajiki from user's balance
-        await updateUserBalance(user.id, -product.priceKur);
+    // Получаем информацию о товаре и пользователе
+    const product = await prisma.product.findUnique({
+      where: { id: productId }
+    });
 
-        // Update product stock
-        await prisma.product.update({
-          where: { id: productId },
-          data: { stock: { decrement: 1 } }
-        });
+    if (!product) {
+      return ctx.reply('Товар не найден');
+    }
 
-        // Notify user about successful purchase
-        sendMessageToUser(user.telegramId, `Вы успешно купили ${product.name} за ${product.priceKur} куражиков.`);
+    if (product.stock <= 0) {
+      return ctx.reply('К сожалению, товар закончился');
+    }
 
-        // Notify admin about successful purchase
-        const adminChatId = process.env.ADMIN_CHAT_ID;
-        sendMessageToUser(adminChatId, `Пользователь ${user.telegramId} купил ${product.name} за ${product.priceKur} куражиков.`);
-      } else {
-        ctx.reply('Недостаточно куражиков для покупки или товар недоступен.');
+    // Проверяем, есть ли у пользователя активная скидка
+    const discountCode = ctx.session?.discountCode;
+    let finalPrice = product.priceRub;
+
+    if (discountCode && discountCode.startsWith('WHEEL') && discountCode.includes('D')) {
+      const discountPercent = parseInt(discountCode.match(/D(\d+)/)[1]);
+      finalPrice = Math.round(product.priceRub * (1 - discountPercent / 100));
+    }
+
+    // Генерируем ссылку для оплаты
+    const isTestMode = process.env.ROBOKASSA_TEST_MODE === 'true';
+    const paymentUrl = generatePaymentUrl(
+      finalPrice,
+      `Оплата товара: ${product.name}`,
+      isTestMode
+    );
+
+    // Отправляем сообщение с ссылкой на оплату
+    await ctx.reply(
+      `Для оплаты товара "${product.name}" перейдите по ссылке:\n` +
+      `Сумма к оплате: ${finalPrice}₽`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '💳 Оплатить', url: paymentUrl }],
+            [{ text: '🔙 Вернуться к товару', callback_data: `view_product_${productId}` }]
+          ]
+        }
       }
-    };
+    );
+
+  } catch (error) {
+    console.error('Ошибка при покупке товара:', error);
+    await ctx.reply('Произошла ошибка при оформлении покупки. Пожалуйста, попробуйте позже.');
+  }
+};

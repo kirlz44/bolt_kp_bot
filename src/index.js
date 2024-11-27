@@ -2,6 +2,11 @@ const { Telegraf, Scenes: { Stage }, session } = require('telegraf');
 const dotenv = require('dotenv');
 const authMiddleware = require('./middleware/auth');
 const uploadVideoScene = require('./scenes/uploadVideoScene');
+const addWheelPrizeScene = require('./scenes/addWheelPrizeScene');
+const postVerificationScene = require('./scenes/postVerificationScene');
+const addProductScene = require('./scenes/addProductScene');
+const editProductScene = require('./scenes/editProductScene');
+const addGameScene = require('./scenes/addGameScene');
 
 // Загружаем переменные окружения
 dotenv.config();
@@ -10,7 +15,14 @@ dotenv.config();
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 // Создаем stage для сцен
-const stage = new Stage([uploadVideoScene]);
+const stage = new Stage([
+  uploadVideoScene, 
+  addWheelPrizeScene, 
+  postVerificationScene,
+  addProductScene,
+  editProductScene,
+  addGameScene
+]);
 
 // Добавляем middleware
 bot.use(session());
