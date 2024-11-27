@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build
+dist/
+build/
+out/
+
+# Database
+*.sqlite
+*.db
+
+# Prisma
+prisma/migrations/
+.prisma/
+
+# Testing
+coverage/
+
+# Misc
+.tmp/
+.temp/ 

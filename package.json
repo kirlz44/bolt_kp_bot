@@ -1,0 +1,18 @@
+{
+      "name": "kp_bot",
+      "version": "1.0.0",
+      "dependencies": {
+            "@prisma/client": "^5.22.0",
+            "dotenv": "^16.0.0",
+            "node-cron": "^3.0.3",
+            "telegraf": "^4.12.0"
+      },
+      "devDependencies": {
+            "prisma": "latest"
+      },
+      "scripts": {
+            "start": "node src/index.js",
+            "prisma:generate": "prisma generate",
+            "prisma:migrate": "prisma migrate dev"
+      }
+}

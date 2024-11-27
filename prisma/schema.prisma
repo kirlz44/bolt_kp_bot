@@ -1,0 +1,112 @@
+datasource db {
+      provider = "postgresql"
+      url      = env("DATABASE_URL")
+    }
+
+    generator client {
+      provider = "prisma-client-js"
+    }
+
+    model User {
+      id         Int      @id @default(autoincrement())
+      telegramId BigInt   @unique
+      role       String   @default("user")
+      balance    Int      @default(0)
+      qualification String?
+      phoneNumber String?
+      lastWheelSpin DateTime?
+      
+      referrals        Referral[] @relation("ReferredUsers")
+      referredBy       Referral[] @relation("Referrer")
+      transactions     Transaction[]
+      bonuses          Bonus[]
+      createdGames     Game[]
+      createdEvents    Event[]
+    }
+
+    model Referral {
+      id         Int      @id @default(autoincrement())
+      userId     Int
+      referrerId Int
+      createdAt  DateTime @default(now())
+
+      user       User     @relation("ReferredUsers", fields: [userId], references: [id])
+      referrer   User     @relation("Referrer", fields: [referrerId], references: [id])
+    }
+
+    model Transaction {
+      id          Int      @id @default(autoincrement())
+      userId      Int
+      amount      Float
+      description String
+      status      String
+      createdAt   DateTime @default(now())
+
+      user        User     @relation(fields: [userId], references: [id])
+    }
+
+    model Bonus {
+      id          Int      @id @default(autoincrement())
+      userId      Int
+      amount      Float
+      description String
+      createdAt   DateTime @default(now())
+
+      user        User     @relation(fields: [userId], references: [id])
+    }
+
+    model Game {
+      id          Int      @id @default(autoincrement())
+      creatorId   Int
+      title       String
+      date        DateTime
+      location    String
+      priceRub    Float
+      priceKur    Float
+      seats       Int
+      createdAt   DateTime @default(now())
+
+      creator     User     @relation(fields: [creatorId], references: [id])
+    }
+
+    model Event {
+      id          Int      @id @default(autoincrement())
+      creatorId   Int
+      title       String
+      date        DateTime
+      location    String
+      priceRub    Float
+      priceKur    Float
+      seats       Int
+      createdAt   DateTime @default(now())
+
+      creator     User     @relation(fields: [creatorId], references: [id])
+    }
+
+    model Product {
+      id          Int      @id @default(autoincrement())
+      name        String
+      description String
+      priceRub    Float
+      priceKur    Float
+      stock       Int      @default(0)
+      imageId     String?
+      createdAt   DateTime @default(now())
+      updatedAt   DateTime @updatedAt
+    }
+
+    model WheelPrize {
+      id          Int      @id @default(autoincrement())
+      type        String
+      name        String
+      value       Float
+      probability Float
+      active      Boolean  @default(true)
+    }
+
+    model WelcomeVideo {
+      id           Int      @id @default(autoincrement())
+      qualification String
+      fileId       String
+      createdAt    DateTime @default(now())
+    }
