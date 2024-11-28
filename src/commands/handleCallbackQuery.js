@@ -671,7 +671,7 @@ module.exports = async (ctx) => {
             message += `📝 ${game.description}\n\n`;
           }
           message += `📅 Дата: ${game.date.toLocaleDateString()}\n`;
-          message += `⏰ Время: ${game.date.toLocaleTimeString()}\n`;
+          message += `⏰ В��емя: ${game.date.toLocaleTimeString()}\n`;
           message += `📍 Место: ${game.location}\n`;
           message += `💰 Цена: ${game.priceRub}₽ / ${game.priceKur} куражиков\n`;
           message += `👥 Свободных мест: ${game.seats}\n`;
@@ -980,7 +980,7 @@ module.exports = async (ctx) => {
             [{ text: '🔙 Назад', callback_data: 'manage_games' }]
           ];
 
-          // Сначала удал��ем текущее сообщение
+          // Сначала удалм текущее сообщение
           await ctx.deleteMessage();
 
           // Отправляем новое сообщение
@@ -1264,6 +1264,10 @@ module.exports = async (ctx) => {
           console.error('Ошибка при добавлении игры:', error);
           await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
         }
+        break;
+
+      case 'manage_events':
+        require('./manageEvents')(ctx);
         break;
 
       default:

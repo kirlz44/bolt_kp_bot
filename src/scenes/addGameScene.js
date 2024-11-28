@@ -1,83 +1,139 @@
 const { Scenes } = require('telegraf');
 const { PrismaClient } = require('@prisma/client');
+const { validateDateTime } = require('../utils/dateValidation');
 const prisma = new PrismaClient();
 
 const addGameScene = new Scenes.WizardScene(
   'add_game_scene',
-  // Шаг 1: Название игры
+  // Шаг 1: Запрос названия игры
   async (ctx) => {
-    await ctx.reply('Введите название игры:', {
-      reply_markup: {
-        inline_keyboard: [[{ text: '🔙 Отмена', callback_data: 'cancel_add_game' }]]
+    try {
+      ctx.scene.session.gameData = {};
+      await ctx.reply('Введите название игры:');
+      return ctx.wizard.next();
+    } catch (error) {
+      console.error('Ошибка при запросе названия игры:', error);
+      await ctx.reply('Произошла ошибка. Попробуйте снова или обратитесь к администратору.');
+      return ctx.scene.leave();
+    }
+  },
+  // Шаг 2: Запрос даты и времени
+  async (ctx) => {
+    try {
+      ctx.scene.session.gameData.title = ctx.message.text;
+      await ctx.reply(
+        'Введите дату и время проведения игры в формате ДД.ММ.ГГГГ ЧЧ:ММ\n' +
+        'Например: 25.12.2024 19:30'
+      );
+      return ctx.wizard.next();
+    } catch (error) {
+      console.error('Ошибка при запросе даты и времени:', error);
+      await ctx.reply('Произошла ошибка. Попробуйте снова или обратитесь к администратору.');
+      return ctx.scene.leave();
+    }
+  },
+  // Шаг 3: Проверка даты и запрос места проведения
+  async (ctx) => {
+    try {
+      const dateTimeStr = ctx.message.text;
+      const validation = validateDateTime(dateTimeStr);
+
+      if (!validation.isValid) {
+        await ctx.reply(
+          `❌ ${validation.error}\n\n` +
+          'Пожалуйста, введите дату и время снова в формате ДД.ММ.ГГГГ ЧЧ:ММ'
+        );
+        return; // Остаемся на текущем шаге
       }
-    });
-    ctx.scene.session.gameData = {};
-    return ctx.wizard.next();
-  },
-  // Шаг 2: Дата и время
-  async (ctx) => {
-    if (!ctx.message?.text) return;
-    ctx.scene.session.gameData.title = ctx.message.text;
-    await ctx.reply(
-      'Введите дату и время проведения игры в формате ДД.ММ.ГГГГ ЧЧ:ММ\n' +
-      'Например: 25.12.2024 19:00'
-    );
-    return ctx.wizard.next();
-  },
-  // Шаг 3: Место проведения
-  async (ctx) => {
-    if (!ctx.message?.text) return;
-    const [date, time] = ctx.message.text.split(' ');
-    const [day, month, year] = date.split('.');
-    const [hours, minutes] = time.split(':');
-    ctx.scene.session.gameData.date = new Date(year, month - 1, day, hours, minutes);
-    
-    await ctx.reply('Введите место проведения игры:');
-    return ctx.wizard.next();
+
+      ctx.scene.session.gameData.date = validation.date;
+      await ctx.reply('Введите место проведения игры:');
+      return ctx.wizard.next();
+    } catch (error) {
+      console.error('Ошибка при проверке даты:', error);
+      await ctx.reply('Произошла ошибка. Попробуйте снова или обратитесь к администратору.');
+      return ctx.scene.leave();
+    }
   },
   // Шаг 4: Цена
   async (ctx) => {
-    if (!ctx.message?.text) return;
-    ctx.scene.session.gameData.location = ctx.message.text;
-    
-    await ctx.reply(
-      'Введите стоимость участия в формате "РУБЛИ КУРАЖИКИ"\n' +
-      'Например: 1000 2000'
-    );
-    return ctx.wizard.next();
+    try {
+      if (!ctx.message?.text) return;
+      ctx.scene.session.gameData.location = ctx.message.text;
+      
+      await ctx.reply(
+        'Введите стоимость участия в формате "РУБЛИ КУРАЖИКИ"\n' +
+        'Например: 1000 2000'
+      );
+      return ctx.wizard.next();
+    } catch (error) {
+      console.error('Ошибка при запросе цены:', error);
+      await ctx.reply('Произошла ошибка. Попробуйте снова или обратитесь к администратору.');
+      return ctx.scene.leave();
+    }
   },
   // Шаг 5: Количество мест
   async (ctx) => {
-    if (!ctx.message?.text) return;
-    const [priceRub, priceKur] = ctx.message.text.split(' ').map(Number);
-    ctx.scene.session.gameData.priceRub = priceRub;
-    ctx.scene.session.gameData.priceKur = priceKur;
-    
-    await ctx.reply('Введите количество мест:');
-    return ctx.wizard.next();
+    try {
+      if (!ctx.message?.text) return;
+      const [priceRub, priceKur] = ctx.message.text.split(' ').map(Number);
+      
+      if (isNaN(priceRub) || isNaN(priceKur)) {
+        await ctx.reply('Пожалуйста, введите корректные числовые значения в формате "РУБЛИ КУРАЖИКИ"');
+        return;
+      }
+      
+      ctx.scene.session.gameData.priceRub = priceRub;
+      ctx.scene.session.gameData.priceKur = priceKur;
+      
+      await ctx.reply('Введите количество мест:');
+      return ctx.wizard.next();
+    } catch (error) {
+      console.error('Ошибка при обработке цены:', error);
+      await ctx.reply('Произошла ошибка. Попробуйте снова или обратитесь к администратору.');
+      return ctx.scene.leave();
+    }
   },
   // Шаг 6: Описание
   async (ctx) => {
-    if (!ctx.message?.text) return;
-    ctx.scene.session.gameData.seats = parseInt(ctx.message.text);
-    
-    await ctx.reply('Введите описание игры:');
-    return ctx.wizard.next();
+    try {
+      if (!ctx.message?.text) return;
+      const seats = parseInt(ctx.message.text);
+      
+      if (isNaN(seats) || seats <= 0) {
+        await ctx.reply('Пожалуйста, введите корректное количество мест (положительное число)');
+        return;
+      }
+      
+      ctx.scene.session.gameData.seats = seats;
+      await ctx.reply('Введите описание игры:');
+      return ctx.wizard.next();
+    } catch (error) {
+      console.error('Ошибка при обработке количества мест:', error);
+      await ctx.reply('Произошла ошибка. Попробуйте снова или обратитесь к администратору.');
+      return ctx.scene.leave();
+    }
   },
   // Шаг 7: Изображение
   async (ctx) => {
-    if (!ctx.message?.text) return;
-    ctx.scene.session.gameData.description = ctx.message.text;
-    
-    await ctx.reply(
-      'Отправьте изображение для игры (или нажмите "Пропустить"):',
-      {
-        reply_markup: {
-          inline_keyboard: [[{ text: '⏩ Пропустить', callback_data: 'skip_image' }]]
+    try {
+      if (!ctx.message?.text) return;
+      ctx.scene.session.gameData.description = ctx.message.text;
+      
+      await ctx.reply(
+        'Отправьте изображение для игры (или нажмите "Пропустить"):',
+        {
+          reply_markup: {
+            inline_keyboard: [[{ text: '⏩ Пропустить', callback_data: 'skip_image' }]]
+          }
         }
-      }
-    );
-    return ctx.wizard.next();
+      );
+      return ctx.wizard.next();
+    } catch (error) {
+      console.error('Ошибка при запросе изображения:', error);
+      await ctx.reply('Произошла ошибка. Попробуйте снова или обратитесь к администратору.');
+      return ctx.scene.leave();
+    }
   },
   // Шаг 8: Сохранение
   async (ctx) => {
@@ -86,7 +142,6 @@ const addGameScene = new Scenes.WizardScene(
         ctx.scene.session.gameData.imageId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
       }
       
-      // Получаем пользователя из базы данных
       const user = await prisma.user.findUnique({
         where: { telegramId: ctx.from.id }
       });
@@ -95,12 +150,11 @@ const addGameScene = new Scenes.WizardScene(
         throw new Error('Пользователь не найден');
       }
 
-      // Создаем игру в базе данных
       const game = await prisma.game.create({
         data: {
           ...ctx.scene.session.gameData,
           creator: {
-            connect: { id: user.id } // Связываем с существующим пользователем
+            connect: { id: user.id }
           }
         }
       });
@@ -108,7 +162,6 @@ const addGameScene = new Scenes.WizardScene(
       await ctx.reply('✅ Игра успешно создана!');
       await ctx.scene.leave();
 
-      // Возвращаемся к управлению играми
       await ctx.reply('Управление играми', {
         reply_markup: {
           inline_keyboard: [
@@ -117,54 +170,18 @@ const addGameScene = new Scenes.WizardScene(
         }
       });
     } catch (error) {
-      console.error('Ошибка при создании игры:', error);
+      console.error('Ошибка при сохранении игры:', error);
       await ctx.reply('Произошла ошибка при создании игры. Пожалуйста, попробуйте снова.');
-      await ctx.scene.leave();
+      return ctx.scene.leave();
     }
   }
 );
 
 // Обработка отмены
 addGameScene.action('cancel_add_game', async (ctx) => {
-  await ctx.reply('Создание игры отменено');
-  await ctx.scene.leave();
-  await ctx.reply('Управление играми', {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '🔙 Вернуться к управлению играми', callback_data: 'manage_games' }]
-      ]
-    }
-  });
-});
-
-// Обработка пропуска изображения
-addGameScene.action('skip_image', async (ctx) => {
   try {
-    await ctx.answerCbQuery();
-
-    // Получаем пользователя из базы данных
-    const user = await prisma.user.findUnique({
-      where: { telegramId: ctx.from.id }
-    });
-
-    if (!user) {
-      throw new Error('Пользователь не найден');
-    }
-
-    // Создаем игру в базе данных без изображения
-    const game = await prisma.game.create({
-      data: {
-        ...ctx.scene.session.gameData,
-        creator: {
-          connect: { id: user.id } // Связываем с существующим пользователем
-        }
-      }
-    });
-
-    await ctx.reply('✅ Игра успешно создана!');
+    await ctx.reply('Создание игры отменено');
     await ctx.scene.leave();
-
-    // Возвращаемся к управлению играми
     await ctx.reply('Управление играми', {
       reply_markup: {
         inline_keyboard: [
@@ -173,9 +190,48 @@ addGameScene.action('skip_image', async (ctx) => {
       }
     });
   } catch (error) {
-    console.error('Ошибка при создании игры:', error);
-    await ctx.reply('Произошла ошибка при создании игры. Пожалуйста, попробуйте снова.');
+    console.error('Ошибка при отмене создания игры:', error);
+    await ctx.reply('Произошла ошибка. Попробуйте снова или обратитесь к администратору.');
+    return ctx.scene.leave();
+  }
+});
+
+// Обработка пропуска изображения
+addGameScene.action('skip_image', async (ctx) => {
+  try {
+    await ctx.answerCbQuery();
+    
+    const user = await prisma.user.findUnique({
+      where: { telegramId: ctx.from.id }
+    });
+
+    if (!user) {
+      throw new Error('Пользователь не найден');
+    }
+
+    const game = await prisma.game.create({
+      data: {
+        ...ctx.scene.session.gameData,
+        creator: {
+          connect: { id: user.id }
+        }
+      }
+    });
+
+    await ctx.reply('✅ Игра успешно создана!');
     await ctx.scene.leave();
+
+    await ctx.reply('Управление играми', {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🔙 Вернуться к управлению играми', callback_data: 'manage_games' }]
+        ]
+      }
+    });
+  } catch (error) {
+    console.error('Ошибка при создании игры без изображения:', error);
+    await ctx.reply('Произошла ошибка при создании игры. Пожалуйста, попробуйте снова.');
+    return ctx.scene.leave();
   }
 });
 

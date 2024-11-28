@@ -23,7 +23,7 @@ module.exports = async (ctx) => {
       [{ text: '🎡 Управление колесом фортуны', callback_data: 'manage_wheel' }],
       [{ text: '🛍 Управление товарами', callback_data: 'manage_products' }],
       [{ text: '🎮 Управление играми', callback_data: 'manage_games' }],
-      [{ text: '🎪 Создать мероприятие', callback_data: 'create_event' }],
+      [{ text: '🎪 Управление мероприятиями', callback_data: 'manage_events' }],
       [{ text: '📢 Рассылка', callback_data: 'broadcast' }],
       [{ text: '📊 Управление активностями', callback_data: 'manage_activities' }],
       [{ text: '📈 Статистика', callback_data: 'view_statistics' }],
