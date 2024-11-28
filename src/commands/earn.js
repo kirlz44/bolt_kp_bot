@@ -32,11 +32,19 @@ module.exports = async (ctx) => {
       ]
     };
 
-    await ctx.reply(message, {
-      parse_mode: 'Markdown',
-      reply_markup: keyboard,
-      disable_web_page_preview: true
-    });
+    if (ctx.callbackQuery) {
+      await ctx.editMessageText(message, {
+        parse_mode: 'Markdown',
+        reply_markup: keyboard,
+        disable_web_page_preview: true
+      });
+    } else {
+      await ctx.reply(message, {
+        parse_mode: 'Markdown',
+        reply_markup: keyboard,
+        disable_web_page_preview: true
+      });
+    }
   } catch (error) {
     console.error('Ошибка в команде earn:', error);
     await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');

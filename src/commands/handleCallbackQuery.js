@@ -37,8 +37,13 @@ module.exports = async (ctx) => {
         break;
 
       case 'open_menu':
-        // Используем существующую команду menu
-        require('./menu')(ctx);
+        // Обновляем существующее сообщение вместо отправки нового
+        const menuKeyboard = await require('./menu').getMenuKeyboard(ctx.state.userRole);
+        await ctx.editMessageText('Главное меню', {
+          reply_markup: {
+            inline_keyboard: menuKeyboard
+          }
+        });
         break;
 
       case 'check_balance':
@@ -61,11 +66,88 @@ module.exports = async (ctx) => {
         break;
 
       case 'marketplace':
-        require('./marketplace')(ctx);
+        try {
+          const products = await prisma.product.findMany({
+            where: {
+              stock: {
+                gt: 0
+              }
+            }
+          });
+
+          let message = '*Маркетплейс*\n\n';
+          
+          if (products.length > 0) {
+            message += 'Доступные товары:\n\n';
+            products.forEach(product => {
+              message += `📦 ${product.name} - ${product.priceRub}₽ / ${product.priceKur} куражиков\n`;
+            });
+            message += '\nДля просмотра подробной информации о товарах нажмите кнопку "Каталог"';
+
+            // Создаем новое сообщение вместо редактирования
+            await ctx.deleteMessage();
+            await ctx.reply(message, {
+              parse_mode: 'Markdown',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '📑 Каталог', callback_data: 'show_catalog' }],
+                  [{ text: '🔙 В меню', callback_data: 'open_menu' }]
+                ]
+              }
+            });
+          } else {
+            await ctx.deleteMessage();
+            await ctx.reply('На данный момент нет доступных товаров.', {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔙 В меню', callback_data: 'open_menu' }]
+                ]
+              }
+            });
+          }
+        } catch (error) {
+          console.error('Ошибка в маркетплейсе:', error);
+          await ctx.reply('Произошла ошибка при загрузке товаров. Пожалуйста, попробуйте позже.');
+        }
         break;
 
       case 'games':
-        require('./games')(ctx);
+        try {
+          const games = await prisma.game.findMany({
+            where: {
+              date: {
+                gte: new Date()
+              }
+            },
+            orderBy: {
+              date: 'asc'
+            }
+          });
+
+          const message = games.length === 0 
+            ? 'На данный момент нет запланированных игр'
+            : 'Доступные игры:';
+
+          const keyboard = games.map(game => ([{
+            text: `${game.title} - ${game.date.toLocaleDateString()}`,
+            callback_data: `view_game_${game.id}`
+          }]));
+
+          keyboard.push([{ text: '🔙 В меню', callback_data: 'open_menu' }]);
+
+          // Сначала удаляем текущее сообщение
+          await ctx.deleteMessage();
+
+          // Отправляем новое сообщение
+          await ctx.reply(message, {
+            reply_markup: {
+              inline_keyboard: keyboard
+            }
+          });
+        } catch (error) {
+          console.error('Ошибка при получении списка игр:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
         break;
 
       case 'events':
@@ -143,7 +225,7 @@ module.exports = async (ctx) => {
           
           message += `\nОбщая сумма вероятностей: ${totalProbability}%`;
           
-          await ctx.reply(message, {
+          await ctx.editMessageText(message, {
             parse_mode: 'Markdown',
             reply_markup: {
               inline_keyboard: [
@@ -163,8 +245,13 @@ module.exports = async (ctx) => {
           });
           
           if (prizes.length === 0) {
-            await ctx.reply('Нет активных призов для удаления');
-            break;
+            return ctx.editMessageText('Нет активных призов для удаления', {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔙 Назад', callback_data: 'manage_wheel' }]
+                ]
+              }
+            });
           }
 
           const keyboard = prizes.map(prize => [{
@@ -174,7 +261,7 @@ module.exports = async (ctx) => {
 
           keyboard.push([{ text: '🔙 Назад', callback_data: 'manage_wheel' }]);
 
-          await ctx.reply('Выберите приз для удаления:', {
+          await ctx.editMessageText('Выберите приз для удаления:', {
             reply_markup: {
               inline_keyboard: keyboard
             }
@@ -193,7 +280,7 @@ module.exports = async (ctx) => {
               data: { active: false }
             });
             
-            await ctx.reply('Приз успешно удален!', {
+            await ctx.editMessageText('Приз успешно удален!', {
               reply_markup: {
                 inline_keyboard: [
                   [{ text: '🔙 Вернуться к управлению колесом', callback_data: 'manage_wheel' }]
@@ -434,15 +521,11 @@ module.exports = async (ctx) => {
       case 'show_catalog':
         try {
           const products = await prisma.product.findMany({
-            where: {
-              stock: {
-                gt: 0
-              }
-            }
+            where: { stock: { gt: 0 } }
           });
 
           if (products.length === 0) {
-            return ctx.reply('В каталоге пока нет доступных товаров', {
+            return ctx.editMessageText('В каталоге пока нет доступных товаров', {
               reply_markup: {
                 inline_keyboard: [
                   [{ text: '🔙 Назад', callback_data: 'marketplace' }]
@@ -450,6 +533,9 @@ module.exports = async (ctx) => {
               }
             });
           }
+
+          // Сначала удаляем текущее сообщение
+          await ctx.deleteMessage();
 
           // Отправляем каждый товар отдельным сообщением с фото
           for (const product of products) {
@@ -484,7 +570,7 @@ module.exports = async (ctx) => {
             }
           }
 
-          // Добавляем кнопку возврата после всех товаров
+          // В конце добавляем кнопку возврата
           await ctx.reply('Для возврата нажмите кнопку ниже:', {
             reply_markup: {
               inline_keyboard: [
@@ -494,136 +580,72 @@ module.exports = async (ctx) => {
           });
 
         } catch (error) {
-          console.error('Ошибка при отображении каталога:', error);
-          await ctx.reply('Произошла ошибка при загрузке каталога. Пожалуйста, попробуйте позже.');
+          console.error('Ошибка при отображении каталоа:', error);
+          await ctx.reply('Произошла ошибка при загрузке каталога.');
         }
         break;
 
       case 'referral_program':
-        require('./referralProgram')(ctx);
+        try {
+          const user = await prisma.user.findUnique({
+            where: { telegramId: ctx.from.id }
+          });
+          
+          if (user) {
+            const referrals = await prisma.referral.findMany({
+              where: { referrerId: user.id },
+              include: { user: true }
+            });
+
+            let message = '📊 *Подробная статистика рефералов:*\n\n';
+            
+            if (referrals.length > 0) {
+              message += '*Рефералы первого уровня:*\n';
+              referrals.forEach((ref, index) => {
+                const username = ref.user.telegramId;
+                message += `${index + 1}. ID: ${username}\n`;
+              });
+            } else {
+              message += 'У вас пока нет рефералов\n';
+            }
+
+            await ctx.editMessageText(message, {
+              parse_mode: 'Markdown',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔗 Получить реферальную ссылку', callback_data: 'copy_referral_link' }],
+                  [{ text: '🔙 В меню', callback_data: 'open_menu' }]
+                ]
+              }
+            });
+          }
+        } catch (error) {
+          console.error('Ошибка при показе реферальной программы:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
         break;
 
       case 'copy_referral_link':
-        const userId = ctx.from.id;
-        const botUsername = process.env.BOT_USERNAME || 'studiokp_bot';
-        const referralLink = `https://t.me/${botUsername}?start=${userId}`;
-        await ctx.reply(
-          '🔗 Вот ваша реферальная ссылка:\n\n' +
-          `\`${referralLink}\`\n\n` +
-          'Скопируйте её и отправьте друзьям!',
-          {
-            parse_mode: 'Markdown',
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '🔙 Назад', callback_data: 'referral_program' }]
-              ]
-            }
-          }
-        );
-        break;
-
-      case 'referral_stats':
-        const user = await prisma.user.findUnique({
-          where: { telegramId: ctx.from.id }
-        });
-        
-        if (user) {
-          const referrals = await prisma.referral.findMany({
-            where: { referrerId: user.id },
-            include: {
-              user: true
-            }
-          });
-
-          let message = '📊 *Подробная статистика рефералов:*\n\n';
+        try {
+          const botUsername = process.env.BOT_USERNAME || 'studiokp_bot';
+          const referralLink = `https://t.me/${botUsername}?start=${ctx.from.id}`;
           
-          if (referrals.length > 0) {
-            message += '*Рефералы первого уровня:*\n';
-            referrals.forEach((ref, index) => {
-              const username = ref.user.telegramId;
-              message += `${index + 1}. ID: ${username}\n`;
-            });
-          } else {
-            message += 'У вас пока нет рефералов\n';
-          }
-
-          await ctx.reply(message, {
-            parse_mode: 'Markdown',
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '🔙 Назад', callback_data: 'referral_program' }]
-              ]
+          await ctx.editMessageText(
+            '🔗 Вот ваша реферальная ссылка:\n\n' +
+            `\`${referralLink}\`\n\n` +
+            'Скопируйте её и отправьте друзьям!',
+            {
+              parse_mode: 'Markdown',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔙 Назад', callback_data: 'referral_program' }]
+                ]
+              }
             }
-          });
-        }
-        break;
-
-      case 'add_game':
-        if (userRole === 'admin' || userRole === 'superadmin') {
-          await ctx.scene.enter('add_game_scene');
-        } else {
-          await ctx.reply('У вас нет доступа к управлению играми');
-        }
-        break;
-
-      case 'list_games':
-        if (userRole === 'admin' || userRole === 'superadmin') {
-          const games = await prisma.game.findMany({
-            orderBy: { date: 'asc' }
-          });
-          
-          let message = '*Список игр:*\n\n';
-          games.forEach(game => {
-            message += `🎮 *${game.title}*\n`;
-            message += `📝 ${game.description}\n`;
-            message += `📅 ${game.date.toLocaleDateString()}\n`;
-            message += `⏰ ${game.date.toLocaleTimeString()}\n`;
-            message += `📍 ${game.location}\n`;
-            message += `💰 ${game.priceRub}₽ / ${game.priceKur} куражиков\n`;
-            message += `👥 Мест: ${game.seats}\n\n`;
-          });
-
-          await ctx.reply(message, {
-            parse_mode: 'Markdown',
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '🔙 Назад', callback_data: 'manage_games' }]
-              ]
-            }
-          });
-        }
-        break;
-
-      case 'delete_game':
-        if (userRole === 'admin' || userRole === 'superadmin') {
-          const games = await prisma.game.findMany({
-            orderBy: { date: 'asc' }
-          });
-          
-          const keyboard = games.map(game => ([{
-            text: `${game.title} (${game.date.toLocaleDateString()})`,
-            callback_data: `confirm_delete_game_${game.id}`
-          }]));
-          
-          keyboard.push([{ text: '🔙 Назад', callback_data: 'manage_games' }]);
-          
-          await ctx.reply('Выберите игру для удаления:', {
-            reply_markup: { inline_keyboard: keyboard }
-          });
-        }
-        break;
-
-      case data.match(/^confirm_delete_game_(\d+)/)?.[0]:
-        if (userRole === 'admin' || userRole === 'superadmin') {
-          const gameId = parseInt(data.split('_')[3]);
-          await prisma.game.delete({ where: { id: gameId } });
-          await ctx.reply('Игра успешн удалена', {
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '🔙 Назад к управлению играми', callback_data: 'manage_games' }]
-              ]
-            }
-          });
+          );
+        } catch (error) {
+          console.error('Ошибка при копировании реферальной ссылки:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
         }
         break;
 
@@ -635,7 +657,13 @@ module.exports = async (ctx) => {
           });
 
           if (!game) {
-            return ctx.reply('Игра не найдена');
+            return ctx.editMessageText('Игра не найдена', {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔙 К списку игр', callback_data: 'games' }]
+                ]
+              }
+            });
           }
 
           let message = `🎮 *${game.title}*\n\n`;
@@ -663,7 +691,7 @@ module.exports = async (ctx) => {
               reply_markup: { inline_keyboard: keyboard }
             });
           } else {
-            await ctx.reply(message, {
+            await ctx.editMessageText(message, {
               parse_mode: 'Markdown',
               reply_markup: { inline_keyboard: keyboard }
             });
@@ -741,9 +769,9 @@ module.exports = async (ctx) => {
             return ctx.reply('Игра не найдена');
           }
 
-          // Уведомляем организатора о новой оплате
+          // Уведомляем организатора о новй оплате
           const paymentMessage = 
-            `💰 Новая оплата за игру!\n\n` +
+            `💰 Новая плата за игру!\n\n` +
             `Игра: ${game.title}\n` +
             `Дата: ${game.date.toLocaleDateString()}\n` +
             `Сумма: ${game.priceRub}₽\n` +
@@ -766,7 +794,7 @@ module.exports = async (ctx) => {
             {
               reply_markup: {
                 inline_keyboard: [
-                  [{ text: '🔙 К списку игр', callback_data: 'games' }]
+                  [{ text: '🔄 К списку игр', callback_data: 'games' }]
                 ]
               }
             }
@@ -919,6 +947,52 @@ module.exports = async (ctx) => {
         } catch (error) {
           console.error('Ошибка при отклонении поста:', error);
           await ctx.reply('Произошла ошибка при отклонении поста');
+        }
+        break;
+
+      case 'list_games':
+        try {
+          const games = await prisma.game.findMany({
+            orderBy: {
+              date: 'asc'
+            }
+          });
+
+          let message = '*Список игр*\n\n';
+          
+          if (games.length > 0) {
+            games.forEach(game => {
+              message += `🎮 ${game.title}\n`;
+              message += `📅 ${game.date.toLocaleDateString()}\n`;
+              message += `⏰ ${game.date.toLocaleTimeString()}\n`;
+              message += `📍 ${game.location}\n`;
+              message += `💰 ${game.priceRub}₽ / ${game.priceKur} куражиков\n`;
+              message += `👥 Мест: ${game.seats}\n\n`;
+            });
+          } else {
+            message += 'Нет запланированных игр\n';
+          }
+
+          const keyboard = [
+            [{ text: '➕ Добавить игру', callback_data: 'add_game' }],
+            [{ text: '✏️ Редактировать игру', callback_data: 'edit_game' }],
+            [{ text: '❌ Удалить игру', callback_data: 'delete_game' }],
+            [{ text: '🔙 Назад', callback_data: 'manage_games' }]
+          ];
+
+          // Сначала удаляем текущее сообщение
+          await ctx.deleteMessage();
+
+          // Отправляем новое сообщение
+          await ctx.reply(message, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: keyboard
+            }
+          });
+        } catch (error) {
+          console.error('Ошибка при получении списка игр:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
         }
         break;
 

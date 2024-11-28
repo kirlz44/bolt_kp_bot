@@ -8,7 +8,11 @@ module.exports = async (ctx) => {
     const user = await prisma.user.findUnique({ where: { telegramId: userId } });
 
     if (!user) {
-      return ctx.reply('Пользователь не найден');
+      return ctx.editMessageText('Пользователь не найден', {
+        reply_markup: {
+          inline_keyboard: [[{ text: '🔙 В меню', callback_data: 'open_menu' }]]
+        }
+      });
     }
 
     const message = 'Стать партнером можно двумя способами:\n' +
@@ -21,7 +25,7 @@ module.exports = async (ctx) => {
       [{ text: '🔙 Вернуться в меню', callback_data: 'open_menu' }]
     ];
 
-    await ctx.reply(message, {
+    await ctx.editMessageText(message, {
       reply_markup: {
         inline_keyboard: keyboard
       }

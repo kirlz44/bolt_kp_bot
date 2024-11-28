@@ -6,7 +6,7 @@ module.exports = async (ctx) => {
     const games = await prisma.game.findMany({
       where: {
         date: {
-          gte: new Date() // Только предстоящие игры
+          gte: new Date()
         }
       },
       orderBy: {
@@ -14,17 +14,10 @@ module.exports = async (ctx) => {
       }
     });
 
-    if (games.length === 0) {
-      return ctx.reply('На данный момент нет запланированных игр', {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🔙 В меню', callback_data: 'open_menu' }]
-          ]
-        }
-      });
-    }
+    const message = games.length === 0 
+      ? 'На данный момент нет запланированных игр'
+      : 'Доступные игры:';
 
-    // Создаем клавиатуру со списком игр
     const keyboard = games.map(game => ([{
       text: `${game.title} - ${game.date.toLocaleDateString()}`,
       callback_data: `view_game_${game.id}`
@@ -32,11 +25,20 @@ module.exports = async (ctx) => {
 
     keyboard.push([{ text: '🔙 В меню', callback_data: 'open_menu' }]);
 
-    await ctx.reply('Доступные игры:', {
-      reply_markup: {
-        inline_keyboard: keyboard
-      }
-    });
+    // Проверяем, вызвана ли команда через callback
+    if (ctx.callbackQuery) {
+      await ctx.editMessageText(message, {
+        reply_markup: {
+          inline_keyboard: keyboard
+        }
+      });
+    } else {
+      await ctx.reply(message, {
+        reply_markup: {
+          inline_keyboard: keyboard
+        }
+      });
+    }
   } catch (error) {
     console.error('Ошибка при получении списка игр:', error);
     await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');

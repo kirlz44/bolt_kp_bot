@@ -4,7 +4,11 @@ const prisma = new PrismaClient();
 module.exports = async (ctx) => {
   try {
     if (ctx.state.userRole !== 'admin' && ctx.state.userRole !== 'superadmin') {
-      return ctx.reply('У вас нет доступа к управлению видео');
+      return ctx.editMessageText('У вас нет доступа к управлению видео', {
+        reply_markup: {
+          inline_keyboard: [[{ text: '🔙 В меню', callback_data: 'admin_panel' }]]
+        }
+      });
     }
 
     const qualifications = [
@@ -37,7 +41,7 @@ module.exports = async (ctx) => {
 
     keyboard.push([{ text: '🔙 Назад', callback_data: 'admin_panel' }]);
 
-    await ctx.reply(message, {
+    await ctx.editMessageText(message, {
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: keyboard
