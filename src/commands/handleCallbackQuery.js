@@ -790,7 +790,7 @@ module.exports = async (ctx) => {
           });
 
           await ctx.reply(
-            'Информация об оплате отправлена организатору. Ожидайте подтверждения.',
+            'Информация об оплате отправлеа организатору. Ожидайте подтверждения.',
             {
               reply_markup: {
                 inline_keyboard: [
@@ -980,7 +980,7 @@ module.exports = async (ctx) => {
             [{ text: '🔙 Назад', callback_data: 'manage_games' }]
           ];
 
-          // Сначала удаляем текущее сообщение
+          // Сначала удал��ем текущее сообщение
           await ctx.deleteMessage();
 
           // Отправляем новое сообщение
@@ -992,6 +992,276 @@ module.exports = async (ctx) => {
           });
         } catch (error) {
           console.error('Ошибка при получении списка игр:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      case 'edit_game':
+        try {
+          const games = await prisma.game.findMany({
+            orderBy: {
+              date: 'asc'
+            }
+          });
+
+          if (games.length === 0) {
+            await ctx.deleteMessage();
+            return ctx.reply('Нет игр для редактирования', {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔙 Назад', callback_data: 'manage_games' }]
+                ]
+              }
+            });
+          }
+
+          let message = '*Выберите игру для редактирования:*\n\n';
+          
+          const keyboard = games.map(game => ([{
+            text: `${game.title} - ${game.date.toLocaleDateString()}`,
+            callback_data: `edit_game_${game.id}`
+          }]));
+
+          keyboard.push([{ text: '🔙 Назад', callback_data: 'manage_games' }]);
+
+          // Сначала удаляем текущее сообщение
+          await ctx.deleteMessage();
+
+          // Отправляем новое сообщение со списком игр
+          await ctx.reply(message, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: keyboard
+            }
+          });
+        } catch (error) {
+          console.error('Ошибка при выборе игры для редактирования:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      case data.match(/^edit_game_(\d+)/)?.[0]:
+        try {
+          const gameId = parseInt(data.split('_')[2]);
+          const game = await prisma.game.findUnique({
+            where: { id: gameId }
+          });
+
+          if (!game) {
+            return ctx.editMessageText('Игра не найдена', {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔙 Назад', callback_data: 'edit_game' }]
+                ]
+              }
+            });
+          }
+
+          // Показываем параметры игры, которые можно отредактировать
+          const editMessage = 
+            `*Редактирование игры:* ${game.title}\n\n` +
+            'Выберите параметр для редактирования:';
+
+          const editKeyboard = [
+            [{ text: '📝 Название', callback_data: `edit_game_title_${gameId}` }],
+            [{ text: '📅 Дата и время', callback_data: `edit_game_date_${gameId}` }],
+            [{ text: '📍 Место проведения', callback_data: `edit_game_location_${gameId}` }],
+            [{ text: '💰 Цена', callback_data: `edit_game_price_${gameId}` }],
+            [{ text: '👥 Количество мест', callback_data: `edit_game_seats_${gameId}` }],
+            [{ text: '📝 Описание', callback_data: `edit_game_description_${gameId}` }],
+            [{ text: '🖼 Изображение', callback_data: `edit_game_image_${gameId}` }],
+            [{ text: '🔙 Назад', callback_data: 'edit_game' }]
+          ];
+
+          await ctx.editMessageText(editMessage, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: editKeyboard
+            }
+          });
+
+        } catch (error) {
+          console.error('Ошибка при редактировании игры:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      // Обработчики для каждого параметра редактирования
+      case data.match(/^edit_game_(title|date|location|price|seats|description|image)_\d+/)?.[0]:
+        try {
+          const [, , param, gameId] = data.split('_');
+          // Сохраняем данные в сессии для последующего использования
+          ctx.session = {
+            ...ctx.session,
+            editingGame: {
+              id: parseInt(gameId),
+              param: param
+            }
+          };
+          
+          let promptMessage;
+          switch (param) {
+            case 'title':
+              promptMessage = 'Введите новое название игры:';
+              break;
+            case 'date':
+              promptMessage = 'Введите новую дату и время в формате ДД.ММ.ГГГГ ЧЧ:ММ:';
+              break;
+            case 'location':
+              promptMessage = 'Введите новое место проведения:';
+              break;
+            case 'price':
+              promptMessage = 'Введите новую цену в формате "РУБЛИ КУРАЖИКИ" (например: "1000 2000"):';
+              break;
+            case 'seats':
+              promptMessage = 'Введите новое количество мест:';
+              break;
+            case 'description':
+              promptMessage = 'Введите новое описание игры:';
+              break;
+            case 'image':
+              promptMessage = 'Отправьте новое изображение для игры:';
+              break;
+          }
+
+          await ctx.scene.enter('edit_game_scene', { promptMessage });
+        } catch (error) {
+          console.error('Ошибка при редактировании параметра игры:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      case 'delete_game':
+        try {
+          const games = await prisma.game.findMany({
+            orderBy: {
+              date: 'asc'
+            }
+          });
+
+          if (games.length === 0) {
+            await ctx.deleteMessage();
+            return ctx.reply('Нет игр для удаления', {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔙 Назад', callback_data: 'manage_games' }]
+                ]
+              }
+            });
+          }
+
+          let message = '*Выберите игру для удаления:*\n\n';
+          games.forEach(game => {
+            message += `🎮 ${game.title}\n`;
+            message += `📅 ${game.date.toLocaleDateString()}\n`;
+            message += `⏰ ${game.date.toLocaleTimeString()}\n`;
+            message += `📍 ${game.location}\n\n`;
+          });
+
+          const keyboard = games.map(game => ([{
+            text: `${game.title} - ${game.date.toLocaleDateString()}`,
+            callback_data: `confirm_delete_game_${game.id}`
+          }]));
+
+          keyboard.push([{ text: '🔙 Назад', callback_data: 'manage_games' }]);
+
+          // Сначала удаляем текущее сообщение
+          await ctx.deleteMessage();
+
+          // Отправляем новое сообщение со списком игр
+          await ctx.reply(message, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: keyboard
+            }
+          });
+        } catch (error) {
+          console.error('Ошибка при выборе игры для удаления:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      case data.match(/^confirm_delete_game_(\d+)/)?.[0]:
+        try {
+          const gameId = parseInt(data.split('_')[3]);
+          const game = await prisma.game.findUnique({
+            where: { id: gameId }
+          });
+
+          if (!game) {
+            return ctx.editMessageText('Игра не найдена', {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔙 Назад', callback_data: 'delete_game' }]
+                ]
+              }
+            });
+          }
+
+          // Запрашиваем подтверждение удаления
+          await ctx.editMessageText(
+            `❗️ Вы действительно хотите удалить игру "${game.title}"?\n` +
+            `Дата: ${game.date.toLocaleDateString()}\n` +
+            `Время: ${game.date.toLocaleTimeString()}\n` +
+            `Место: ${game.location}`,
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    { text: '✅ Да, удалить', callback_data: `delete_game_confirmed_${gameId}` },
+                    { text: '❌ Отмена', callback_data: 'delete_game' }
+                  ]
+                ]
+              }
+            }
+          );
+        } catch (error) {
+          console.error('Ошибка при подтверждении удаления игры:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      case data.match(/^delete_game_confirmed_(\d+)/)?.[0]:
+        try {
+          const gameId = parseInt(data.split('_')[3]);
+          
+          // Удаляем игру
+          await prisma.game.delete({
+            where: { id: gameId }
+          });
+
+          await ctx.editMessageText('✅ Игра успешно удалена', {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔙 Вернуться к управлению играми', callback_data: 'manage_games' }]
+              ]
+            }
+          });
+        } catch (error) {
+          console.error('Ошибка при удалении игры:', error);
+          await ctx.reply('Произошла ошибка при удалении игры. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      case 'add_game':
+        try {
+          if (userRole !== 'admin' && userRole !== 'superadmin') {
+            return ctx.editMessageText('У вас нет доступа к добавлению игр', {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔙 Назад', callback_data: 'manage_games' }]
+                ]
+              }
+            });
+          }
+
+          // Удаляем текущее сообщение перед входом в сцену
+          await ctx.deleteMessage();
+          
+          // Входим в сцену добавления игры
+          await ctx.scene.enter('add_game_scene');
+        } catch (error) {
+          console.error('Ошибка при добавлении игры:', error);
           await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
         }
         break;

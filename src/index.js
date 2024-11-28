@@ -7,6 +7,7 @@ const postVerificationScene = require('./scenes/postVerificationScene');
 const addProductScene = require('./scenes/addProductScene');
 const editProductScene = require('./scenes/editProductScene');
 const addGameScene = require('./scenes/addGameScene');
+const editGameScene = require('./scenes/editGameScene');
 
 // Загружаем переменные окружения
 dotenv.config();
@@ -21,7 +22,8 @@ const stage = new Stage([
   postVerificationScene,
   addProductScene,
   editProductScene,
-  addGameScene
+  addGameScene,
+  editGameScene
 ]);
 
 // Добавляем middleware
