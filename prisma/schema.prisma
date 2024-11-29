@@ -21,7 +21,8 @@ datasource db {
       transactions     Transaction[]
       bonuses          Bonus[]
       createdGames     Game[]
-      createdEvents    Event[]
+      createdEvents    Event[]    @relation("CreatedEvents")
+      eventsParticipating Event[] @relation("ParticipatingEvents")
     }
 
     model Referral {
@@ -72,17 +73,20 @@ datasource db {
     }
 
     model Event {
-      id          Int      @id @default(autoincrement())
-      creatorId   Int
+      id          Int       @id @default(autoincrement())
       title       String
+      description String?
       date        DateTime
       location    String
-      priceRub    Float
-      priceKur    Float
       seats       Int
-      createdAt   DateTime @default(now())
-
-      creator     User     @relation(fields: [creatorId], references: [id])
+      priceRub    Int
+      priceKur    Int
+      imageId     String?
+      createdAt   DateTime  @default(now())
+      updatedAt   DateTime  @updatedAt
+      creator     User      @relation("CreatedEvents", fields: [creatorId], references: [id])
+      creatorId   Int
+      participants User[]   @relation("ParticipatingEvents")
     }
 
     model Product {

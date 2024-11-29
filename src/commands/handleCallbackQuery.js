@@ -671,7 +671,7 @@ module.exports = async (ctx) => {
             message += `📝 ${game.description}\n\n`;
           }
           message += `📅 Дата: ${game.date.toLocaleDateString()}\n`;
-          message += `⏰ В��емя: ${game.date.toLocaleTimeString()}\n`;
+          message += `⏰ Вемя: ${game.date.toLocaleTimeString()}\n`;
           message += `📍 Место: ${game.location}\n`;
           message += `💰 Цена: ${game.priceRub}₽ / ${game.priceKur} куражиков\n`;
           message += `👥 Свободных мест: ${game.seats}\n`;
@@ -790,7 +790,7 @@ module.exports = async (ctx) => {
           });
 
           await ctx.reply(
-            'Информация об оплате отправлеа организатору. Ожидайте подтверждения.',
+            'Информация б оплате отр��влеа организатору. Ожидайте подтверждения.',
             {
               reply_markup: {
                 inline_keyboard: [
@@ -868,7 +868,7 @@ module.exports = async (ctx) => {
             `${originalMessage}\n\n✅ Пост подтвержден администратором ${adminUsername}`,
             {
               reply_markup: {
-                inline_keyboard: [] // Убираем кнопки после подтверждения
+                inline_keyboard: [] // Убираем кн��пки после подтверждения
               }
             }
           );
@@ -1268,6 +1268,348 @@ module.exports = async (ctx) => {
 
       case 'manage_events':
         require('./manageEvents')(ctx);
+        break;
+
+      case 'add_event':
+        if (userRole === 'admin' || userRole === 'superadmin') {
+          await ctx.scene.enter('add_event_scene');
+        } else {
+          await ctx.reply('У вас нет доступа к созданию мероприятий');
+        }
+        break;
+
+      case 'edit_event':
+        if (userRole === 'admin' || userRole === 'superadmin') {
+          require('./editEvent')(ctx);
+        } else {
+          await ctx.reply('У вас нет доступа к редактированию мероприятий');
+        }
+        break;
+
+      case 'delete_event':
+        if (userRole === 'admin' || userRole === 'superadmin') {
+          require('./deleteEvent')(ctx);
+        } else {
+          await ctx.reply('У вас нет доступа к удалению мероприятий');
+        }
+        break;
+
+      case data.match(/^confirm_delete_event_(\d+)/)?.[0]:
+        if (userRole === 'admin' || userRole === 'superadmin') {
+          const eventId = parseInt(data.split('_')[3]);
+          try {
+            const event = await prisma.event.delete({
+              where: { id: eventId }
+            });
+
+            // Уведомляем всех зарегистрированных участников
+            const registrations = await prisma.eventRegistration.findMany({
+              where: { eventId }
+            });
+
+            for (const reg of registrations) {
+              try {
+                await ctx.telegram.sendMessage(
+                  reg.userId,
+                  `❌ Мероприятие "${event.title}" отменено.\n` +
+                  'Приносим извинения за неудобства.'
+                );
+              } catch (error) {
+                console.error(`Ошибка отправки уведомления пользователю ${reg.userId}:`, error);
+              }
+            }
+
+            await ctx.editMessageText('✅ Мероприятие успешно удалено', {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔙 Вернуться к управлению мероприятиями', callback_data: 'manage_events' }]
+                ]
+              }
+            });
+          } catch (error) {
+            console.error('Ошибка при удалении мероприятия:', error);
+            await ctx.reply('Произошла ошибка при удалении мероприятия');
+          }
+        }
+        break;
+
+      case data.match(/^edit_event_(title|date|location|price|seats|description)_(\d+)/)?.[0]:
+        try {
+          const [, param, eventId] = data.split('_');
+          // Сохраняем данные в сессии для последующего использования
+          ctx.session = {
+            ...ctx.session,
+            editingEvent: {
+              id: parseInt(eventId),
+              param: param
+            }
+          };
+          
+          let promptMessage;
+          switch (param) {
+            case 'title':
+              promptMessage = 'Введите новое название мероприятия:';
+              break;
+            case 'date':
+              promptMessage = 'Введите новую дату и время в формате ДД.ММ.ГГГГ ЧЧ:ММ:';
+              break;
+            case 'location':
+              promptMessage = 'Введите новое место проведения:';
+              break;
+            case 'price':
+              promptMessage = 'Введите новую цену в формате "РУБЛИ КУРАЖИКИ" или "0 0":';
+              break;
+            case 'seats':
+              promptMessage = 'Введите новое количество мест:';
+              break;
+            case 'description':
+              promptMessage = 'Введите новое описание мероприятия:';
+              break;
+          }
+
+          await ctx.scene.enter('edit_event_scene', { promptMessage });
+        } catch (error) {
+          console.error('Ошибка при редактировании параметра мероприятия:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      case data.match(/^register_event_(\d+)/)?.[0]:
+        try {
+          const eventId = parseInt(data.split('_')[2]);
+          const event = await prisma.event.findUnique({
+            where: { id: eventId },
+            include: { participants: true }
+          });
+
+          if (!event) {
+            return ctx.reply('Мероприятие не найдено');
+          }
+
+          if (event.seats <= event.participants.length) {
+            return ctx.reply('К сожалению, все места уже заняты');
+          }
+
+          // Находим пользователя
+          const user = await prisma.user.findUnique({
+            where: { telegramId: BigInt(ctx.from.id) }
+          });
+
+          if (!user) {
+            return ctx.reply('Пользователь не найден');
+          }
+
+          // Проверяем, не зарегистрирован ли уже пользователь
+          const isAlreadyRegistered = event.participants.some(p => p.id === user.id);
+          if (isAlreadyRegistered) {
+            return ctx.reply('Вы уже зарегистрированы на это мероприятие');
+          }
+
+          if (event.priceRub > 0) {
+            // Если мероприятие платное, предлагаем способы оплаты
+            await ctx.reply(
+              `Стоимость участия: ${event.priceRub}₽ или ${event.priceKur} куражиков\n` +
+              'Выберите способ оплаты:',
+              {
+                reply_markup: {
+                  inline_keyboard: [
+                    [
+                      { text: '💳 Оплатить деньгами', callback_data: `pay_event_money_${eventId}` },
+                      { text: '💎 Оплатить куражиками', callback_data: `pay_event_kurajiki_${eventId}` }
+                    ]
+                  ]
+                }
+              }
+            );
+          } else {
+            // Если мероприятие бесплатное, сразу регистрируем
+            await prisma.event.update({
+              where: { id: eventId },
+              data: {
+                participants: {
+                  connect: { id: user.id }
+                }
+              }
+            });
+
+            // Запрашиваем номер телефона
+            await ctx.reply(
+              'Для завершения регистрации, пожалуйста, поделитесь вашим номером телефона:',
+              {
+                reply_markup: {
+                  keyboard: [
+                    [{
+                      text: '📱 Поделиться номером',
+                      request_contact: true
+                    }]
+                  ],
+                  resize_keyboard: true,
+                  one_time_keyboard: true
+                }
+              }
+            );
+
+            // Уведомляем админов
+            await ctx.telegram.sendMessage(
+              process.env.ADMIN_CHAT_ID,
+              `👤 Новая регистрация на мероприятие!\n\n` +
+              `Мероприятие: ${event.title}\n` +
+              `Участник: ${ctx.from.first_name} ${ctx.from.last_name || ''}\n` +
+              `Username: @${ctx.from.username || 'отсутствует'}`
+            );
+          }
+        } catch (error) {
+          console.error('Ошибка при регистрации на мероприятие:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      case data.match(/^pay_event_(money|kurajiki)_(\d+)/)?.[0]:
+        try {
+          const [, paymentType, eventId] = data.split('_');
+          const event = await prisma.event.findUnique({
+            where: { 
+              id: parseInt(eventId) 
+            }
+          });
+
+          if (!event) {
+            return ctx.reply('Мероприятие не найдено');
+          }
+
+          if (paymentType === 'money') {
+            // Оплата через Robokassa
+            const isTestMode = process.env.ROBOKASSA_TEST_MODE === 'true';
+            const paymentUrl = generatePaymentUrl(
+              event.priceRub,
+              `Оплата участия в мероприятии: ${event.title}`,
+              isTestMode
+            );
+
+            await ctx.reply(
+              `Для оплаты участия в мероприятии "${event.title}" перейдите по ссылке:\n` +
+              `Сумма к оплате: ${event.priceRub}₽`,
+              {
+                reply_markup: {
+                  inline_keyboard: [
+                    [{ text: '💳 Оплатить', url: paymentUrl }],
+                    [{ text: '🔙 Вернуться к мероприятию', callback_data: `view_event_${eventId}` }]
+                  ]
+                }
+              }
+            );
+          } else {
+            // Оплата куражиками
+            const user = await prisma.user.findUnique({
+              where: { telegramId: BigInt(ctx.from.id) }
+            });
+
+            if (!user) {
+              return ctx.reply('Пользователь не найден');
+            }
+
+            if (user.balance < event.priceKur) {
+              return ctx.reply(
+                'Недостаточно куражиков для участия в мероприятии.\n' +
+                `Необходимо: ${event.priceKur} куражиков\n` +
+                `Ваш баланс: ${user.balance} куражиков`,
+                {
+                  reply_markup: {
+                    inline_keyboard: [
+                      [{ text: '💰 Заработать куражики', callback_data: 'earn' }],
+                      [{ text: '🔙 Вернуться к мероприятию', callback_data: `view_event_${eventId}` }]
+                    ]
+                  }
+                }
+              );
+            }
+
+            // Списываем куражики и регистрируем участника
+            await prisma.$transaction([
+              prisma.user.update({
+                where: { id: user.id },
+                data: { balance: { decrement: event.priceKur } }
+              }),
+              prisma.event.update({
+                where: { id: event.id },
+                data: {
+                  participants: {
+                    connect: { id: user.id }
+                  }
+                }
+              })
+            ]);
+
+            // Запрашиваем номер телефона
+            await ctx.reply(
+              'Для завершения регистрации, пожалуйста, поделитесь вашим номером телефона:',
+              {
+                reply_markup: {
+                  keyboard: [
+                    [{
+                      text: '📱 Поделиться номером',
+                      request_contact: true
+                    }]
+                  ],
+                  resize_keyboard: true,
+                  one_time_keyboard: true
+                }
+              }
+            );
+
+            // Уведомляем админов
+            await ctx.telegram.sendMessage(
+              process.env.ADMIN_CHAT_ID,
+              `💎 Новая оплата куражиками!\n\n` +
+              `Мероприятие: ${event.title}\n` +
+              `Сумма: ${event.priceKur} куражиков\n` +
+              `Участник: ${ctx.from.first_name} ${ctx.from.last_name || ''}\n` +
+              `Username: @${ctx.from.username || 'отсутствует'}`
+            );
+          }
+        } catch (error) {
+          console.error('Ошибка при оплате мероприятия:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      case data.match(/^view_event_(\d+)/)?.[0]:
+        try {
+          const eventId = parseInt(data.split('_')[2]);
+          const event = await prisma.event.findUnique({
+            where: { id: eventId },
+            include: { participants: true }
+          });
+
+          if (!event) {
+            return ctx.reply('Мероприятие не найдено');
+          }
+
+          const message = {
+            text: `🎪 ${event.title}\n\n` +
+                  `📝 ${event.description || ''}\n` +
+                  `📅 ${event.date.toLocaleDateString()}\n` +
+                  `⏰ ${event.date.toLocaleTimeString()}\n` +
+                  `📍 ${event.location}\n` +
+                  `👥 Свободных мест: ${event.seats - event.participants.length}\n\n` +
+                  `Стоимость: ${event.priceRub > 0 ? `${event.priceRub}₽ / ${event.priceKur} куражиков` : 'Бесплатно'}`,
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '✍️ Записаться', callback_data: `register_event_${event.id}` }],
+                [{ text: '🔙 К списку мероприятий', callback_data: 'events' }]
+              ]
+            }
+          };
+
+          if (event.imageId) {
+            await ctx.replyWithPhoto(event.imageId, message);
+          } else {
+            await ctx.reply(message.text, message);
+          }
+        } catch (error) {
+          console.error('Ошибка при просмотре мероприятия:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
         break;
 
       default:
