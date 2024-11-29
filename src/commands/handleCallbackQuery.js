@@ -1,12 +1,78 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
+// Добавляем в начало файла функцию getMenuKeyboard
+function getMenuKeyboard(userRole) {
+  let keyboard = [
+    [{ text: '🤝 Стать партнером', callback_data: 'become_partner' }],
+    [{ text: '🎡 Крутить колесо фортуны', callback_data: 'spin_wheel' }],
+    [{ text: '🛍 Маркетплейс', callback_data: 'marketplace' }],
+    [{ text: '🎮 Игры', callback_data: 'games' }],
+    [{ text: '🎪 Мероприятия', callback_data: 'events' }],
+    [{ text: '💰 Заработать', callback_data: 'earn' }],
+    [{ text: '👥 Реферальная программа', callback_data: 'referral_program' }],
+    [{ text: '❓ Помощь', callback_data: 'help' }]
+  ];
+
+  // Добавляем кнопки для админа
+  if (userRole === 'admin' || userRole === 'superadmin') {
+    keyboard.push([{ text: '⚙️ Панель администратора', callback_data: 'admin_panel' }]);
+  }
+
+  // Добавляем кнопки для партнера
+  if (userRole === 'partner') {
+    keyboard.push([{ text: '🎮 Мои игры', callback_data: 'my_games' }]);
+  }
+
+  return keyboard;
+}
+
+// Исправляем функцию handleQualification
+async function handleQualification(ctx, qualificationNumber) {
+  try {
+    const userId = ctx.from.id;
+    const user = await prisma.user.findUnique({
+      where: { telegramId: userId }
+    });
+
+    if (user) {
+      // Обновляем квалификацию пользователя
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { qualification: `qualification_${qualificationNumber}` }
+      });
+
+      // Получаем приветственное видео для данной квалификации
+      const welcomeVideo = await prisma.welcomeVideo.findFirst({
+        where: { qualification: `qualification_${qualificationNumber}` }
+      });
+
+      if (welcomeVideo) {
+        await ctx.replyWithVideo(welcomeVideo.fileId, {
+          caption: 'В нашем боте вы можете ежедневно вращать колесо фортуны, зарабатывать Куражики, записываться на игры или мероприятия!'
+        });
+      }
+
+      // Начисляем приветственные куражики
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { balance: { increment: 1000 } }
+      });
+
+      // Показываем основное меню
+      require('./menu')(ctx);
+    }
+  } catch (error) {
+    console.error('Ошибка при обработке квалификации:', error);
+    await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+  }
+}
+
+// Экспортируем функцию вместе с основным обработчиком
 module.exports = async (ctx) => {
   try {
     const data = ctx.callbackQuery.data;
     const userId = ctx.from.id;
-
-    // Проверяем роль пользователя
     const userRole = ctx.state.userRole;
 
     switch (data) {
@@ -37,13 +103,47 @@ module.exports = async (ctx) => {
         break;
 
       case 'open_menu':
-        // Обновляем существующее сообщение вместо отправки нового
-        const menuKeyboard = await require('./menu').getMenuKeyboard(ctx.state.userRole);
-        await ctx.editMessageText('Главное меню', {
-          reply_markup: {
-            inline_keyboard: menuKeyboard
+        try {
+          const user = await prisma.user.findUnique({
+            where: { telegramId: BigInt(ctx.from.id) }
+          });
+
+          const message = 
+            `*🎪 Добро пожаловать в Студию Кураж Продаж!*\n\n` +
+            `💎 Ваш баланс: ${user?.balance || 0} куражиков\n\n` +
+            `*О нашем боте:*\n` +
+            `• Участвуйте в мероприятиях и играх для развития навыков продаж\n` +
+            `• Зарабатывайте куражики за активность и используйте их для оплаты\n` +
+            `• Получайте доступ к эксклюзивным обучающим материалам\n` +
+            `• Приглашайте друзей и получайте бонусы\n` +
+            `• Крутите колесо фортуны и выигрывайте призы\n` +
+            `• Покупайте товары в маркетплейсе\n\n` +
+            `*Доступные действия:*\n` +
+            `🎮 Игры - участвуйте в играх по продажам\n` +
+            `🎪 Мероприятия - записывайтесь на тренинги и встречи\n` +
+            `🎡 Колесо фортуны - испытайте удачу\n` +
+            `💰 Заработать - получайте куражики за активность\n` +
+            `🛍️ Маркетплейс - обменивайте куражики на товары\n` +
+            `👥 Реферальная программа - приглашайте друзей за куражики\n` +
+            `🤝 Стать партнером - больше возможностей`;
+
+          const keyboard = getMenuKeyboard(userRole);
+
+          if (ctx.callbackQuery) {
+            await ctx.editMessageText(message, {
+              parse_mode: 'Markdown',
+              reply_markup: { inline_keyboard: keyboard }
+            });
+          } else {
+            await ctx.reply(message, {
+              parse_mode: 'Markdown',
+              reply_markup: { inline_keyboard: keyboard }
+            });
           }
-        });
+        } catch (error) {
+          console.error('Ошибка при открытии меню:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
         break;
 
       case 'check_balance':
@@ -271,7 +371,7 @@ module.exports = async (ctx) => {
           
           prizes.forEach(prize => {
             message += `🎁 ${prize.name}\n`;
-            message += `Вер��ятность: ${prize.probability}%\n\n`;
+            message += `Верятность: ${prize.probability}%\n\n`;
             totalProbability += prize.probability;
           });
           
@@ -362,7 +462,7 @@ module.exports = async (ctx) => {
           // Уведомляем победителя
           await ctx.telegram.sendMessage(
             winnerTelegramId,
-            '🎁 Ваш специальный приз готов к выдаче! Администратор свяжется с вами в ближайшее время.'
+            '🎁 Ваш специальный приз гото к выдаче! Администратор свяжется с вами в ближайшее время.'
           );
         }
         break;
@@ -543,7 +643,7 @@ module.exports = async (ctx) => {
             // Уведомляем покупателя
             await ctx.telegram.sendMessage(
               userId,
-              '✅ Ваш товар готов к выдаче! Администратор ��вяжется с вами в ближайшее время.'
+              '✅ Ваш товар готов к выдаче! Администратор свяжется с вами в ближайшее время.'
             );
 
             // Отправляем служебное общение в админский чат
@@ -665,7 +765,7 @@ module.exports = async (ctx) => {
               parse_mode: 'Markdown',
               reply_markup: {
                 inline_keyboard: [
-                  [{ text: '🔙 Получить реферальную ссылку', callback_data: 'copy_referral_link' }],
+                  [{ text: '🔗 Получить реферальную ссылку', callback_data: 'copy_referral_link' }],
                   [{ text: '🔙 В меню', callback_data: 'open_menu' }]
                 ]
               }
@@ -771,7 +871,7 @@ module.exports = async (ctx) => {
           });
 
           if (!game) {
-            return ctx.reply('Игр не найдена');
+            return ctx.reply('Игр не надена');
           }
 
           // Проверяем, кто создал игру (админ или партнер)
@@ -827,7 +927,7 @@ module.exports = async (ctx) => {
             `Игра: ${game.title}\n` +
             `Дата: ${game.date.toLocaleDateString()}\n` +
             `Сумма: ${game.priceRub}₽\n` +
-            `Уча��тник: ${ctx.from.first_name} ${ctx.from.last_name || ''}\n` +
+            `Участник: ${ctx.from.first_name} ${ctx.from.last_name || ''}\n` +
             `Username: @${ctx.from.username || 'отсутствует'}\n` +
             `ID: ${ctx.from.id}`;
 
@@ -987,7 +1087,7 @@ module.exports = async (ctx) => {
           await ctx.telegram.sendMessage(
             userId,
             '❌ К сожалению, ваш пост не прошел проверку.\n' +
-            'Пожалуйста, убед��тесь, чт�� пост соответствует требованиям и попробуйте снова.',
+            'Пожалуйста, убедтесь, чт пост соответствует требованиям и попробуйте снова.',
             {
               reply_markup: {
                 inline_keyboard: [
@@ -1043,7 +1143,7 @@ module.exports = async (ctx) => {
             }
           });
         } catch (error) {
-          console.error('Ошибка при по��учении списка игр:', error);
+          console.error('Ошибка при поучении списка игр:', error);
           await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
         }
         break;
@@ -1134,7 +1234,7 @@ module.exports = async (ctx) => {
 
         } catch (error) {
           console.error('Ошибка при редактировании игры:', error);
-          await ctx.reply('Произошла ��шибка. Пожалуйста, попробуйте позже.');
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
         }
         break;
 
@@ -1142,7 +1242,7 @@ module.exports = async (ctx) => {
       case data.match(/^edit_game_(title|date|location|price|seats|description|image)_\d+/)?.[0]:
         try {
           const [, , param, gameId] = data.split('_');
-          // Сохраняем днные  сесии для последующего использования
+          // Сохраняем днные  сеии для последующего использования
           ctx.session = {
             ...ctx.session,
             editingGame: {
@@ -1285,7 +1385,7 @@ module.exports = async (ctx) => {
           await ctx.editMessageText('✅ Игра успешно удалена', {
             reply_markup: {
               inline_keyboard: [
-                [{ text: '🔙 Вернуться к управлению играми', callback_data: 'manage_games' }]
+                [{ text: '🔙 Вернуться к управлению играм', callback_data: 'manage_games' }]
               ]
             }
           });
@@ -1562,7 +1662,7 @@ module.exports = async (ctx) => {
           const eventId = parseInt(data.match(/^pay_event_(?:money|kurajiki)_(\d+)/)[1]);
           const paymentType = data.includes('money') ? 'money' : 'kurajiki';
 
-          // Проверяем корректно��ть ID
+          // Проверяем корректноть ID
           if (isNaN(eventId)) {
             console.log('Некорректный ID мероприятия:', eventId);
             await ctx.reply('Произошла ошибка. Некорректный ID мероприятия.');
@@ -1857,7 +1957,6 @@ module.exports = async (ctx) => {
                   id: true,
                   telegramId: true,
                   phoneNumber: true,
-                  qualification: true,
                   role: true,
                   balance: true
                 }
@@ -1889,21 +1988,24 @@ module.exports = async (ctx) => {
           message += `Всего зарегистрировано: ${event.participants.length} из ${event.seats}\n\n`;
           message += '*Список участников:*\n\n';
 
-          // Получаем информацию о каждом участнике
+          // Получаем информацию о пользователях последовательно
           for (let i = 0; i < event.participants.length; i++) {
             const participant = event.participants[i];
             try {
-              // Преобразуем BigInt в строку для telegramId
-              const chatInfo = await ctx.telegram.getChat(participant.telegramId.toString());
+              // Преобразуем BigInt в строку для работы с Telegram API
+              const telegramId = participant.telegramId.toString();
+              const userInfo = await ctx.telegram.getChatMember(telegramId, telegramId);
               
-              message += `${i + 1}. ${chatInfo.first_name} ${chatInfo.last_name || ''}\n`;
+              message += `${i + 1}. ${userInfo.user.first_name} ${userInfo.user.last_name || ''}\n`;
+              message += `👤 ID: ${telegramId}\n`;
+              message += `${userInfo.user.username ? `@${userInfo.user.username}\n` : ''}`;
+              message += `📱 ${participant.phoneNumber || 'Номер не указан'}\n\n`;
+            } catch (userError) {
+              // Если не удалось получить информацию о пользователе
+              message += `${i + 1}. Участник\n`;
               message += `👤 ID: ${participant.telegramId.toString()}\n`;
-              message += `${chatInfo.username ? `@${chatInfo.username}\n` : ''}`;
               message += `📱 ${participant.phoneNumber || 'Номер не указан'}\n\n`;
-            } catch (error) {
-              console.error(`Ошибка при получении информации о пользователе ${participant.telegramId}:`, error);
-              message += `${i + 1}. ID: ${participant.telegramId.toString()}\n`;
-              message += `📱 ${participant.phoneNumber || 'Номер не указан'}\n\n`;
+              console.error(`Ошибка при получении информации о пользователе ${participant.telegramId}:`, userError);
             }
           }
 
@@ -1953,43 +2055,3 @@ module.exports = async (ctx) => {
     ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
   }
 };
-
-async function handleQualification(ctx, qualificationNumber) {
-  try {
-    const userId = ctx.from.id;
-    const user = await prisma.user.findUnique({
-      where: { telegramId: userId }
-    });
-
-    if (user) {
-      // Обновляем квалификацию пользователя
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { qualification: `qualification_${qualificationNumber}` }
-      });
-
-      // Получаем приветственное видео для данной квалификации
-      const welcomeVideo = await prisma.welcomeVideo.findFirst({
-        where: { qualification: `qualification_${qualificationNumber}` }
-      });
-
-      if (welcomeVideo) {
-        await ctx.replyWithVideo(welcomeVideo.fileId, {
-          caption: 'В нашем боте вы можете ежедневно вращать колесо фортуны, зарабатывать Куражики, записываться на игры или мероприятия!'
-        });
-      }
-
-      // Начисляем приветственные куражики
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { balance: { increment: 1000 } }
-      });
-
-      // Показываем основное меню
-      require('./menu')(ctx);
-    }
-  } catch (error) {
-    console.error('Ошибка при обработке квалификации:', error);
-    await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
-  }
-}
