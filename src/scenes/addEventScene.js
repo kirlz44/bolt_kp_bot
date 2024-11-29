@@ -23,21 +23,64 @@ const addEventScene = new Scenes.WizardScene(
   },
   // Шаг 4: Место проведения
   async (ctx) => {
-    const dateStr = ctx.message.text;
-    const [datePart, timePart] = dateStr.split(' ');
-    const [day, month, year] = datePart.split('.');
-    const [hours, minutes] = timePart.split(':');
-    
-    const date = new Date(year, month - 1, day, hours, minutes);
-    
-    if (isNaN(date.getTime())) {
-      await ctx.reply('Неверный формат даты. Попробуйте еще раз (ДД.ММ.ГГГГ ЧЧ:ММ):');
+    try {
+      const dateStr = ctx.message.text;
+      
+      // Проверяем формат даты с помощью регулярного выражения
+      const dateRegex = /^(\d{2})\.(\d{2})\.(\d{4})\s(\d{2}):(\d{2})$/;
+      const match = dateStr.match(dateRegex);
+      
+      if (!match) {
+        await ctx.reply(
+          'Неверный формат даты и времени.\n' +
+          'Пожалуйста, используйте формат ДД.ММ.ГГГГ ЧЧ:ММ\n' +
+          'Например: 25.12.2024 19:30'
+        );
+        return;
+      }
+
+      const [, day, month, year, hours, minutes] = match;
+      const date = new Date(year, month - 1, day, hours, minutes);
+      
+      // Проверяем валидность даты
+      if (isNaN(date.getTime())) {
+        await ctx.reply(
+          'Указана некорректная дата.\n' +
+          'Пожалуйста, проверьте правильность введенных данных.'
+        );
+        return;
+      }
+
+      // Проверяем, что дата не в прошлом
+      if (date < new Date()) {
+        await ctx.reply(
+          'Дата мероприятия не может быть в прошлом.\n' +
+          'Пожалуйста, укажите будущую дату.'
+        );
+        return;
+      }
+
+      // Проверяем корректность времени
+      if (hours > 23 || minutes > 59) {
+        await ctx.reply(
+          'Указано некорректное время.\n' +
+          'Часы должны быть от 00 до 23, минуты от 00 до 59.'
+        );
+        return;
+      }
+      
+      ctx.wizard.state.date = date;
+      await ctx.reply('Введите место проведения:');
+      return ctx.wizard.next();
+    } catch (error) {
+      console.error('Ошибка при обработке даты:', error);
+      await ctx.reply(
+        'Произошла ошибка при обработке даты.\n' +
+        'Пожалуйста, введите дату и время в формате ДД.ММ.ГГГГ ЧЧ:ММ\n' +
+        'Например: 25.12.2024 19:30'
+      );
       return;
     }
-    
-    ctx.wizard.state.date = date;
-    await ctx.reply('Введите место проведения:');
-    return ctx.wizard.next();
   },
   // Шаг 5: Количество мест
   async (ctx) => {

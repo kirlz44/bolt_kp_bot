@@ -3,30 +3,19 @@ const prisma = new PrismaClient();
 
 module.exports = async (ctx) => {
   try {
-    const events = await prisma.event.findMany();
-    let message = '*Управление мероприятиями*\n\n';
+    const message = '*Управление мероприятиями*\n\n';
     
-    if (events.length > 0) {
-      message += 'Текущие мероприятия:\n\n';
-      events.forEach(event => {
-        message += `🎪 ${event.title}\n`;
-        message += `📅 ${event.date.toLocaleDateString()}\n`;
-        message += `📍 ${event.location}\n\n`;
-      });
-    } else {
-      message += 'Мероприятия отсутствуют\n';
-    }
+    const keyboard = [
+      [{ text: '➕ Добавить мероприятие', callback_data: 'add_event' }],
+      [{ text: '✏️ Редактировать мероприятие', callback_data: 'edit_event' }],
+      [{ text: '❌ Удалить мероприятие', callback_data: 'delete_event' }],
+      [{ text: '👥 Просмотр регистраций', callback_data: 'view_event_registrations' }],
+      [{ text: '🔙 Назад', callback_data: 'admin_panel' }]
+    ];
 
     await ctx.editMessageText(message, {
       parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '➕ Добавить мероприятие', callback_data: 'add_event' }],
-          [{ text: '✏️ Редактировать мероприятие', callback_data: 'edit_event' }],
-          [{ text: '❌ Удалить мероприятие', callback_data: 'delete_event' }],
-          [{ text: '🔙 Назад', callback_data: 'admin_panel' }]
-        ]
-      }
+      reply_markup: { inline_keyboard: keyboard }
     });
   } catch (error) {
     console.error('Ошибка в управлении мероприятиями:', error);
