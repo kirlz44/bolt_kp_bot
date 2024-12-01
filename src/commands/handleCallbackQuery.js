@@ -98,8 +98,8 @@ module.exports = async (ctx) => {
         break;
 
       case data.match(/^qualification_\d+/)?.[0]:
-        const qualificationNumber = data.split('_')[1];
-        await handleQualification(ctx, qualificationNumber);
+        const qualificationNum = data.split('_')[1];
+        await handleQualification(ctx, qualificationNum);
         break;
 
       case 'open_menu':
@@ -386,7 +386,7 @@ module.exports = async (ctx) => {
             }
           });
         } else {
-          await ctx.reply('У вас нет доступа к управлению призами');
+          await ctx.reply('У вас нет до��тупа к уп��авлению призами');
         }
         break;
 
@@ -900,7 +900,7 @@ module.exports = async (ctx) => {
               });
             }
           } else if (paymentType === 'kurajiki') {
-            // Оплата куражиками с переводом создателю игры
+            // Оплата ��уражиками с переводом создателю игры
             await require('./payGameWithKurajiki')(ctx, gameId);
           }
         } catch (error) {
@@ -1087,7 +1087,7 @@ module.exports = async (ctx) => {
           await ctx.telegram.sendMessage(
             userId,
             '❌ К сожалению, ваш пост не прошел проверку.\n' +
-            'Пожалуйста, убедтесь, чт пост соответствует требованиям и попробуйте снова.',
+            'Пожалуй��та, убедтесь, чт пост соответствует требованиям и попробуйте снова.',
             {
               reply_markup: {
                 inline_keyboard: [
@@ -1278,7 +1278,7 @@ module.exports = async (ctx) => {
 
           await ctx.scene.enter('edit_game_scene', { promptMessage });
         } catch (error) {
-          console.error('Ошибка при редактировании параметра игры:', error);
+          console.error('Ошибка при редактировани�� параметра игры:', error);
           await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
         }
         break;
@@ -1487,7 +1487,7 @@ module.exports = async (ctx) => {
                 participant.telegramId.toString(),
                 `❌ Важное уведомление!\n\n` +
                 `Мероприятие "${event.title}" отменено.\n` +
-                `📅 Дата: ${event.date.toLocaleDateString()}\n` +
+                `📅 Д��та: ${event.date.toLocaleDateString()}\n` +
                 `⏰ Время: ${event.date.toLocaleTimeString()}\n` +
                 `📍 Место: ${event.location}\n` +
                 (event.priceKur > 0 ? 
@@ -1513,7 +1513,7 @@ module.exports = async (ctx) => {
             {
               reply_markup: {
                 inline_keyboard: [
-                  [{ text: '🔙 Вернуться к управлению мероприятиями', callback_data: 'manage_events' }]
+                  [{ text: '🔙 Вернуть��я к управлению мероприятиями', callback_data: 'manage_events' }]
                 ]
               }
             }
@@ -2041,6 +2041,97 @@ module.exports = async (ctx) => {
           console.error('Ошибка при просмотре регистраций:', error);
           await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
         }
+        break;
+
+      case 'broadcast_all':
+        ctx.scene.enter('broadcast_scene', { broadcastType: 'all' });
+        break;
+
+      case 'broadcast_partners':
+        ctx.scene.enter('broadcast_scene', { broadcastType: 'partners' });
+        break;
+
+      case 'broadcast_qualification':
+        // Показываем список квалификаций
+        const qualificationKeyboard = [
+          [{ text: '👨‍💼 Предприниматель/Эксперт', callback_data: 'broadcast_qual_1' }],
+          [{ text: '🎮 Игропрактик', callback_data: 'broadcast_qual_2' }],
+          [{ text: '🎪 Организатор фестивалей', callback_data: 'broadcast_qual_3' }],
+          [{ text: '👨‍🏫 Бизнес-тренер', callback_data: 'broadcast_qual_4' }],
+          [{ text: '👔 Руководитель или HR', callback_data: 'broadcast_qual_5' }],
+          [{ text: '🎯 Интересна движуха', callback_data: 'broadcast_qual_6' }],
+          [{ text: '🌱 Саморазвитие', callback_data: 'broadcast_qual_7' }],
+          [{ text: '🎲 Автор игр', callback_data: 'broadcast_qual_8' }],
+          [{ text: '🧠 Психолог', callback_data: 'broadcast_qual_9' }],
+          [{ text: '🎨 Хочу создать игру', callback_data: 'broadcast_qual_10' }],
+          [{ text: '🔄 Сетевой MLM-бизнес', callback_data: 'broadcast_qual_11' }],
+          [{ text: '💅 Бьюти сфера', callback_data: 'broadcast_qual_12' }],
+          [{ text: '🔙 Назад', callback_data: 'broadcast' }]
+        ];
+
+        await ctx.editMessageText('Выберите квалификацию для рассылки:', {
+          reply_markup: { inline_keyboard: qualificationKeyboard }
+        });
+        break;
+
+      case data.match(/^broadcast_qual_(\d+)/)?.[0]:
+        const broadcastQualNum = data.split('_')[2];
+        ctx.scene.enter('broadcast_scene', { 
+          broadcastType: 'qualification', 
+          qualification: `qualification_${broadcastQualNum}` 
+        });
+        break;
+
+      case 'broadcast_scheduled':
+        const scheduledBroadcasts = await prisma.scheduledBroadcast.findMany({
+          where: {
+            isCompleted: false,
+            scheduledFor: {
+              gt: new Date()
+            }
+          },
+          orderBy: {
+            scheduledFor: 'asc'
+          }
+        });
+
+        let message = '*📅 Запланированные рассылки:*\n\n';
+        
+        if (scheduledBroadcasts.length === 0) {
+          message += 'Нет запланированных рассылок';
+        } else {
+          scheduledBroadcasts.forEach((broadcast, index) => {
+            message += `${index + 1}. ${broadcast.scheduledFor.toLocaleString('ru-RU')}\n`;
+            message += `Тип: ${broadcast.type}\n`;
+            if (broadcast.qualification) {
+              message += `Квалификация: ${broadcast.qualification}\n`;
+            }
+            message += '\n';
+          });
+        }
+
+        const keyboard = [
+          ...scheduledBroadcasts.map(broadcast => ([{
+            text: `❌ Отменить (${broadcast.scheduledFor.toLocaleDateString()})`,
+            callback_data: `cancel_broadcast_${broadcast.id}`
+          }])),
+          [{ text: '🔙 Назад', callback_data: 'broadcast' }]
+        ];
+
+        await ctx.editMessageText(message, {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: keyboard }
+        });
+        break;
+
+      case data.match(/^cancel_broadcast_(\d+)/)?.[0]:
+        const broadcastId = parseInt(data.split('_')[2]);
+        await prisma.scheduledBroadcast.delete({
+          where: { id: broadcastId }
+        });
+        
+        await ctx.reply('✅ Рассылка успешно отменена');
+        await ctx.answerCbQuery();
         break;
 
       default:

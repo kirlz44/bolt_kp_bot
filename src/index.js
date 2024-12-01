@@ -3,7 +3,7 @@ const dotenv = require('dotenv');
 const authMiddleware = require('./middleware/auth');
 const { PrismaClient } = require('@prisma/client');
 const cron = require('node-cron');
-const { sendWeeklyReport } = require('./services/scheduler');
+const { sendWeeklyReport, startScheduler } = require('./services/scheduler');
 
 // Импорт сцен
 const uploadVideoScene = require('./scenes/uploadVideoScene');
@@ -15,6 +15,7 @@ const addGameScene = require('./scenes/addGameScene');
 const editGameScene = require('./scenes/editGameScene');
 const addEventScene = require('./scenes/addEventScene');
 const editEventScene = require('./scenes/editEventScene');
+const broadcastScene = require('./scenes/broadcastScene');
 
 // Инициализация
 dotenv.config();
@@ -42,7 +43,8 @@ const stage = new Stage([
   addGameScene,
   editGameScene,
   addEventScene,
-  editEventScene
+  editEventScene,
+  broadcastScene
 ]);
 
 // Добавляем middleware
@@ -187,6 +189,7 @@ cron.schedule('0 7 * * 0', sendWeeklyReport, {
 // Запускаем бота
 bot.launch().then(() => {
   console.log('Бот успешно запущен!');
+  startScheduler(bot); // Запускаем планировщик
 }).catch((err) => {
   console.error('Ошибка при запуске бота:', err);
 });

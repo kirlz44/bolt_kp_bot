@@ -60,11 +60,84 @@ async function sendWeeklyReport() {
   }
 }
 
-// Запускаем отправку отчета каждое воскресенье в 7:00 МСК
-cron.schedule('0 7 * * 0', sendWeeklyReport, {
-  timezone: 'Europe/Moscow'
-});
+async function checkScheduledBroadcasts(bot) {
+  try {
+    // Получаем все невыполненные рассылки, время которых уже наступило
+    const broadcasts = await prisma.scheduledBroadcast.findMany({
+      where: {
+        isCompleted: false,
+        scheduledFor: {
+          lte: new Date()
+        }
+      }
+    });
+
+    for (const broadcast of broadcasts) {
+      try {
+        let users = [];
+        
+        // Получаем список пользователей в зависимости от типа рассылки
+        switch (broadcast.type) {
+          case 'all':
+            users = await prisma.user.findMany();
+            break;
+          case 'partners':
+            users = await prisma.user.findMany({
+              where: { role: 'partner' }
+            });
+            break;
+          case 'qualification':
+            users = await prisma.user.findMany({
+              where: { qualification: broadcast.qualification }
+            });
+            break;
+        }
+
+        // Отправляем сообщение каждому пользователю
+        let successCount = 0;
+        for (const user of users) {
+          try {
+            if (broadcast.photo) {
+              await bot.telegram.sendPhoto(Number(user.telegramId), broadcast.photo, {
+                caption: broadcast.caption || ''
+              });
+            } else {
+              await bot.telegram.sendMessage(Number(user.telegramId), broadcast.message);
+            }
+            successCount++;
+          } catch (error) {
+            console.error(`Ошибка отправки пользователю ${user.telegramId}:`, error);
+          }
+        }
+
+        // Отмечаем рассылку как выполненную
+        await prisma.scheduledBroadcast.update({
+          where: { id: broadcast.id },
+          data: { isCompleted: true }
+        });
+
+        // Уведомляем создателя рассылки
+        await bot.telegram.sendMessage(
+          Number(broadcast.createdBy),
+          `✅ Запланированная рассылка выполнена!\n` +
+          `Успешно отправлено: ${successCount} из ${users.length} сообщений.`
+        );
+
+      } catch (error) {
+        console.error('Ошибка при выполнении рассылки:', error);
+      }
+    }
+  } catch (error) {
+    console.error('Ошибка при проверке запланированных рассылок:', error);
+  }
+}
+
+// Запускаем проверку каждую минуту
+function startScheduler(bot) {
+  cron.schedule('* * * * *', () => checkScheduledBroadcasts(bot));
+}
 
 module.exports = {
-  sendWeeklyReport
+  sendWeeklyReport,
+  startScheduler
 }; 

@@ -116,3 +116,17 @@ datasource db {
       fileId       String
       createdAt    DateTime @default(now())
     }
+
+    model ScheduledBroadcast {
+      id            Int      @id @default(autoincrement())
+      type          String   // 'all', 'partners', 'qualification'
+      qualification String?  // Для рассылок по квалификации
+      message       String?  // Текст сообщения
+      photo         String?  // file_id фото
+      caption       String?  // Подпись к фото
+      scheduledFor  DateTime // Запланированное время
+      createdBy     BigInt   // ID создателя
+      isCompleted   Boolean  @default(false)
+      createdAt     DateTime @default(now())
+      updatedAt     DateTime @updatedAt
+    }
