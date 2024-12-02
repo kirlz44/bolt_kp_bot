@@ -12,15 +12,17 @@ module.exports = async (ctx) => {
     console.log('userRole:', userRole);
 
     // Проверяем наличие реферальной ссылки
-    const startPayload = ctx.startPayload;
-    console.log('Получен startPayload:', startPayload);
+    let startPayload = ctx.message?.text?.split(' ')[1] || ctx.startPayload;
+    console.log('Полученный текст команды:', ctx.message?.text);
+    console.log('Разобранный startPayload:', startPayload);
     
     let referrerId = null;
+    let referrer = null;
     
     if (startPayload) {
       try {
         // Ищем пользователя по telegramId из стартового параметра
-        const referrer = await prisma.user.findFirst({
+        referrer = await prisma.user.findFirst({
           where: { 
             telegramId: BigInt(startPayload)
           }
@@ -50,6 +52,7 @@ module.exports = async (ctx) => {
       // Если есть реферер, создаем реферальную связь
       if (startPayload && referrerId && referrerId !== BigInt(userId)) {
         console.log('\n=== Начало обработки реферальной программы ===');
+        console.log('Реферер для транзакции:', referrer);
         
         try {
           await prisma.$transaction(async (tx) => {
@@ -79,7 +82,7 @@ module.exports = async (ctx) => {
             // Уведомляем реферера
             await ctx.telegram.sendMessage(
               referrer.telegramId.toString(),
-              `🎉 По вашей реферальной ссылке зарегистрировался новый пользователь ${ctx.from.first_name}!\n` +
+              `🎉 По вашей реферальной ссылке зарегистрировался новый пользователь ${ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name} (${ctx.from.first_name})!\n` +
               `Вам начислено 500 куражиков!`
             );
 

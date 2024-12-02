@@ -57,6 +57,7 @@ module.exports = async (ctx) => {
 
     const botUsername = process.env.BOT_USERNAME || 'studiokp_bot';
     const referralLink = `https://t.me/${botUsername}?start=${user.telegramId.toString()}`;
+    console.log('Сформирована реферальная ссылка:', referralLink);
 
     let message = '👥 *Реферальная программа*\n\n';
     message += `🎭 Ваш статус: ${user.role === 'partner' ? 'Партнер' : 'Пользователь'}\n\n`;

@@ -64,11 +64,7 @@ async function handleQualification(ctx, qualificationNumber) {
       });
     }
 
-    // Начисляем приветственные куражики
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { balance: { increment: 1000 } }
-    });
+    // End of Selection
 
     // Показываем основное меню
     await ctx.reply(
