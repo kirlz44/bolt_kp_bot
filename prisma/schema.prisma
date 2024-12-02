@@ -9,12 +9,13 @@ datasource db {
 
     model User {
       id         Int      @id @default(autoincrement())
-      telegramId BigInt   @unique
+      telegramId BigInt   @unique @map("telegram_id")
       role       String   @default("user")
       balance    Int      @default(0)
       qualification String?
       phoneNumber String?
       lastWheelSpin DateTime?
+      createdAt   DateTime @default(now())
       
       referrals        Referral[] @relation("ReferredUsers")
       referredBy       Referral[] @relation("Referrer")
@@ -24,27 +25,57 @@ datasource db {
       participatingGames Game[]   @relation("GameParticipants")
       createdEvents    Event[]    @relation("CreatedEvents")
       eventsParticipating Event[] @relation("ParticipatingEvents")
+      referralBonuses  ReferralBonus[]
+
+      @@index([telegramId])
     }
 
     model Referral {
       id         Int      @id @default(autoincrement())
       userId     Int
       referrerId Int
+      level      Int      @default(1)
       createdAt  DateTime @default(now())
+      status     String   @default("active")
 
       user       User     @relation("ReferredUsers", fields: [userId], references: [id])
       referrer   User     @relation("Referrer", fields: [referrerId], references: [id])
+      bonuses    ReferralBonus[]
+
+      @@unique([userId, referrerId])
+      @@index([referrerId])
+      @@index([userId])
+    }
+
+    model ReferralBonus {
+      id          Int      @id @default(autoincrement())
+      userId      Int
+      referralId  Int
+      amount      Int
+      type        String
+      level       Int
+      createdAt   DateTime @default(now())
+
+      user        User     @relation(fields: [userId], references: [id])
+      referral    Referral @relation(fields: [referralId], references: [id])
+
+      @@index([userId])
+      @@index([referralId])
     }
 
     model Transaction {
       id          Int      @id @default(autoincrement())
       userId      Int
       amount      Float
+      type        String
       description String
       status      String
       createdAt   DateTime @default(now())
 
       user        User     @relation(fields: [userId], references: [id])
+
+      @@index([userId])
+      @@index([type])
     }
 
     model Bonus {
