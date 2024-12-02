@@ -386,7 +386,7 @@ module.exports = async (ctx) => {
             }
           });
         } else {
-          await ctx.reply('У вас нет доступа к управлению призами');
+          await ctx.reply('У вас нет досту����а к упр��в��ению призами');
         }
         break;
 
@@ -1056,7 +1056,7 @@ module.exports = async (ctx) => {
 
         } catch (error) {
           console.error('Ошибка при удалении мероприятия:', error);
-          await ctx.reply('Произошла ошибка при удалении мероприятия. Пожалуйста, попробуйте позже.');
+          await ctx.reply('Произошла ошибка при удалении мер��приятия. Пожалуйста, попробуйте позже.');
         }
         break;
 
@@ -1250,7 +1250,7 @@ module.exports = async (ctx) => {
             }
 
             try {
-              // Списываем куражики и регистрируем участника
+              // Списываем куражи��и и регистрируем участника
               await prisma.$transaction([
                 prisma.user.update({
                   where: { id: user.id },
@@ -1299,7 +1299,7 @@ module.exports = async (ctx) => {
               await ctx.reply('Произошла ошибка при оплате. Пожалуйста, попробуйте позже.');
             }
           } else {
-            // Оплата через Robokassa
+            // Оплата чере�� Robokassa
             const isTestMode = process.env.ROBOKASSA_TEST_MODE === 'true';
             const paymentUrl = generatePaymentUrl(
               event.priceRub,
@@ -1711,13 +1711,171 @@ module.exports = async (ctx) => {
 
           const message = 
             `*Установка вознаграждения для ${platform}*\n\n` +
-            `Текущее значение: ${currentReward?.amount || 0} куражиков\n\n` +
+            `Текуще�� значение: ${currentReward?.amount || 0} куражиков\n\n` +
             'Введите новое значение вознаграждения в куражиках:';
 
           // Входим в сцену установки вознаграждения
           await ctx.scene.enter('set_reward_scene', { message });
         } catch (error) {
           console.error('Ошибка при установке вознаграждения:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      case 'referral_program':
+        try {
+          const userId = ctx.from.id;
+          const user = await prisma.user.findUnique({
+            where: { telegramId: userId }
+          });
+
+          if (!user) {
+            return ctx.reply('Пользователь не найден');
+          }
+
+          // Получаем статистику рефералов
+          const referrals = await prisma.referral.findMany({
+            where: { referrerId: user.id },
+            include: {
+              user: true
+            }
+          });
+
+          // Считаем рефералов второго уровня
+          const firstLevelIds = referrals.map(ref => ref.userId);
+          const secondLevel = await prisma.referral.count({
+            where: {
+              referrerId: {
+                in: firstLevelIds
+              }
+            }
+          });
+
+          const botUsername = process.env.BOT_USERNAME || 'studiokp_bot';
+          const referralLink = `https://t.me/${botUsername}?start=${userId}`;
+
+          let message = '👥 *Реферальная программа*\n\n';
+          message += '💰 За каждого приглашенного друга:\n';
+          message += '- Первый уровень: 500 куражиков\n';
+          message += '- Второй уровень: 100 куражиков\n\n';
+          message += '📊 *Ваша статистика:*\n';
+          message += `- Рефералов 1-го уровня: ${referrals.length}\n`;
+          message += `- Рефералов 2-го уровня: ${secondLevel}\n\n`;
+          message += '🔗 *Ваша реферальная ссылка:*\n';
+          message += `\`${referralLink}\`\n\n`;
+          message += 'Скопируйте ссылку и отправьте друзьям!';
+
+          const keyboard = {
+            inline_keyboard: [
+              [{ text: '📋 Копировать ссылку', callback_data: 'copy_referral_link' }],
+              [{ text: '📊 Статистика рефералов', callback_data: 'referral_stats' }],
+              [{ text: '🔙 В меню', callback_data: 'open_menu' }]
+            ]
+          };
+
+          if (ctx.callbackQuery) {
+            await ctx.editMessageText(message, {
+              parse_mode: 'Markdown',
+              reply_markup: keyboard
+            });
+          } else {
+            await ctx.reply(message, {
+              parse_mode: 'Markdown',
+              reply_markup: keyboard
+            });
+          }
+        } catch (error) {
+          console.error('Ошибка в реферальной программе:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      case 'copy_referral_link':
+        try {
+          const userId = ctx.from.id;
+          const botUsername = process.env.BOT_USERNAME || 'studiokp_bot';
+          const referralLink = `https://t.me/${botUsername}?start=${userId}`;
+          
+          await ctx.answerCbQuery('Ссылка скопирована!');
+          await ctx.reply(
+            '🔗 Вот ваша реферальная ссылка:\n' +
+            `\`${referralLink}\`\n\n` +
+            'Отправьте её друзьям и получайте бонусы за каждого приглашенного!',
+            {
+              parse_mode: 'Markdown',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔙 Назад', callback_data: 'referral_program' }]
+                ]
+              }
+            }
+          );
+        } catch (error) {
+          console.error('Ошибка при копировании реферальной ссылки:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      case 'referral_stats':
+        try {
+          const userId = ctx.from.id;
+          const user = await prisma.user.findUnique({
+            where: { telegramId: userId },
+            include: {
+              referrals: {
+                include: {
+                  user: true
+                }
+              }
+            }
+          });
+
+          if (!user) {
+            return ctx.reply('Пользователь не найден');
+          }
+
+          let message = '📊 *Детальная статистика рефералов*\n\n';
+          
+          if (user.referrals.length > 0) {
+            message += '*Рефералы первого уровня:*\n';
+            for (const ref of user.referrals) {
+              const refUser = ref.user;
+              message += `- ${refUser.telegramId} (${new Date(ref.createdAt).toLocaleDateString()})\n`;
+            }
+
+            // Получаем рефералов второго уровня
+            const firstLevelIds = user.referrals.map(ref => ref.userId);
+            const secondLevelRefs = await prisma.referral.findMany({
+              where: {
+                referrerId: {
+                  in: firstLevelIds
+                }
+              },
+              include: {
+                user: true
+              }
+            });
+
+            if (secondLevelRefs.length > 0) {
+              message += '\n*Рефералы второго уровня:*\n';
+              for (const ref of secondLevelRefs) {
+                message += `- ${ref.user.telegramId} (${new Date(ref.createdAt).toLocaleDateString()})\n`;
+              }
+            }
+          } else {
+            message += 'У вас пока нет рефералов. Отправьте свою реферальную ссылку друзьям!';
+          }
+
+          await ctx.editMessageText(message, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔙 Назад', callback_data: 'referral_program' }]
+              ]
+            }
+          });
+        } catch (error) {
+          console.error('Ошибка при получении статистики рефералов:', error);
           await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
         }
         break;
