@@ -4,13 +4,6 @@ const prisma = new PrismaClient();
 
 const postVerificationScene = new Scenes.BaseScene('post_verification_scene');
 
-const REWARDS = {
-  vk: 300,
-  instagram: 300,
-  telegram: 200,
-  ok: 200
-};
-
 const NETWORK_NAMES = {
   vk: 'ВКонтакте',
   instagram: 'Instagram',
@@ -20,9 +13,23 @@ const NETWORK_NAMES = {
 
 postVerificationScene.enter(async (ctx) => {
   const network = ctx.scene.state.network;
+  
+  // Получаем актуальное значение вознаграждения из базы данных
+  const reward = await prisma.socialMediaReward.findUnique({
+    where: { platform: network }
+  });
+
+  // Определяем сумму вознаграждения
+  const rewardAmount = reward?.amount || {
+    vk: 300,
+    instagram: 300,
+    telegram: 200,
+    ok: 200
+  }[network];
+
   await ctx.reply(
     `Отправьте скриншот размещенного поста в ${NETWORK_NAMES[network]}.\n` +
-    `За подтвержденный пост вы получите ${REWARDS[network]} куражиков.\n\n` +
+    `За подтвержденный пост вы получите ${rewardAmount} куражиков.\n\n` +
     'Для отмены нажмите /cancel'
   );
 });
@@ -45,6 +52,18 @@ postVerificationScene.on(['photo', 'document'], async (ctx) => {
     const username = ctx.from.username ? `@${ctx.from.username}` : 'не указан';
     const fullName = ctx.from.first_name + (ctx.from.last_name ? ` ${ctx.from.last_name}` : '');
 
+    // Получаем актуальное значение вознаграждения
+    const reward = await prisma.socialMediaReward.findUnique({
+      where: { platform: network }
+    });
+
+    const rewardAmount = reward?.amount || {
+      vk: 300,
+      instagram: 300,
+      telegram: 200,
+      ok: 200
+    }[network];
+
     // Формируем сообщение для админов
     const adminMessage = 
       `📝 Новый пост на проверку!\n\n` +
@@ -52,7 +71,7 @@ postVerificationScene.on(['photo', 'document'], async (ctx) => {
       `Пользователь: ${fullName}\n` +
       `Username: ${username}\n` +
       `ID: ${userId}\n` +
-      `Награда: ${REWARDS[network]} куражиков`;
+      `Награда: ${rewardAmount} куражиков`;
 
     // Пересылаем скриншот и информацию админам
     await ctx.telegram.sendPhoto(
@@ -63,8 +82,14 @@ postVerificationScene.on(['photo', 'document'], async (ctx) => {
         reply_markup: {
           inline_keyboard: [
             [
-              { text: '✅ Подтвердить', callback_data: `approve_post_${userId}_${network}` },
-              { text: '❌ Отклонить', callback_data: `reject_post_${userId}_${network}` }
+              { 
+                text: '✅ Подтвердить', 
+                callback_data: `approve_post_${userId}_${network}`
+              },
+              { 
+                text: '❌ Отклонить', 
+                callback_data: `reject_post_${userId}_${network}` 
+              }
             ]
           ]
         }

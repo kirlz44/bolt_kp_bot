@@ -16,6 +16,7 @@ const editGameScene = require('./scenes/editGameScene');
 const addEventScene = require('./scenes/addEventScene');
 const editEventScene = require('./scenes/editEventScene');
 const broadcastScene = require('./scenes/broadcastScene');
+const setRewardScene = require('./scenes/setRewardScene');
 
 // Инициализация
 dotenv.config();
@@ -44,7 +45,8 @@ const stage = new Stage([
   editGameScene,
   addEventScene,
   editEventScene,
-  broadcastScene
+  broadcastScene,
+  setRewardScene
 ]);
 
 // Добавляем middleware

@@ -386,7 +386,7 @@ module.exports = async (ctx) => {
             }
           });
         } else {
-          await ctx.reply('У вас нет до��тупа к уп��авлению призами');
+          await ctx.reply('У вас нет доступа к управлению призами');
         }
         break;
 
@@ -472,542 +472,47 @@ module.exports = async (ctx) => {
         break;
 
       case data.match(/^post_(vk|instagram|telegram|ok)$/)?.[0]:
+        try {
         const network = data.split('_')[1];
-        ctx.scene.enter('post_verification_scene', { network });
-        break;
-
-      case 'get_referral_link':
-        require('./getReferralLink')(ctx);
-        break;
-
-      case 'add_product':
-        if (userRole === 'admin' || userRole === 'superadmin') {
-          await ctx.scene.enter('add_product_scene');
-        } else {
-          await ctx.reply('У вас нет доступа к управлению товарами');
-        }
-        break;
-
-      case 'list_products':
-        if (userRole === 'admin' || userRole === 'superadmin') {
-          const products = await prisma.product.findMany();
-          let message = '*Список товаров:*\n\n';
           
-          products.forEach(product => {
-            message += `📦 *${product.name}*\n`;
-            message += `📝 ${product.description}\n`;
-            message += `💰 ${product.priceRub}₽ / ${product.priceKur} куражиков\n`;
-            message += `📊 На складе: ${product.stock} шт.\n\n`;
+          // Получаем актуальное значение вознаграждения
+          const reward = await prisma.socialMediaReward.findUnique({
+            where: { platform: network }
           });
 
-          await ctx.reply(message, {
-            parse_mode: 'Markdown',
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '🔙 Назад', callback_data: 'manage_products' }]
-              ]
-            }
+          // Определяем сумму вознаграждения
+          const rewardAmount = reward?.amount || {
+            vk: 300,
+            instagram: 300,
+            telegram: 200,
+            ok: 200
+          }[network];
+
+          // Входим в сцену верификации с передачей сети и вознаграждения
+          await ctx.scene.enter('post_verification_scene', { 
+            network,
+            rewardAmount
           });
-        }
-        break;
-
-      case 'delete_product':
-        if (userRole === 'admin' || userRole === 'superadmin') {
-          const products = await prisma.product.findMany();
-          const keyboard = products.map(product => ([{
-            text: product.name,
-            callback_data: `confirm_delete_product_${product.id}`
-          }]));
-          
-          keyboard.push([{ text: '🔙 Назад', callback_data: 'manage_products' }]);
-          
-          await ctx.reply('Выберите товар для удаления:', {
-            reply_markup: { inline_keyboard: keyboard }
-          });
-        }
-        break;
-
-      case data.match(/^confirm_delete_product_(\d+)/)?.[0]:
-        if (userRole === 'admin' || userRole === 'superadmin') {
-          const productId = parseInt(data.split('_')[3]);
-          await prisma.product.delete({ where: { id: productId } });
-          await ctx.reply('Товар успешно удален', {
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '🔙 Назад к управлению товарами', callback_data: 'manage_products' }]
-              ]
-            }
-          });
-        }
-        break;
-
-      case 'edit_products':
-        if (userRole === 'admin' || userRole === 'superadmin') {
-          await ctx.scene.enter('edit_product_scene');
-        } else {
-          await ctx.reply('У вас нет доступа к управлению товарами');
-        }
-        break;
-
-      case data.match(/^view_product_(\d+)/)?.[0]:
-        try {
-          const productId = parseInt(data.split('_')[2]);
-          const product = await prisma.product.findUnique({
-            where: { id: productId }
-          });
-
-          if (!product) {
-            return ctx.reply('Товар не найден');
-          }
-
-          // Проверяем, есть ли у пользователя активная скидка
-          const discountCode = ctx.session?.discountCode;
-          let discountPercent = 0;
-          if (discountCode && discountCode.startsWith('WHEEL') && discountCode.includes('D')) {
-            discountPercent = parseInt(discountCode.match(/D(\d+)/)[1]);
-          }
-
-          // Рассчитываем цены с учетом скидки
-          const originalPriceRub = product.priceRub;
-          const originalPriceKur = product.priceKur;
-          const discountedPriceRub = Math.round(originalPriceRub * (1 - discountPercent / 100));
-          const discountedPriceKur = Math.round(originalPriceKur * (1 - discountPercent / 100));
-
-          let message = `📦 *${product.name}*\n\n`;
-          message += `📝 ${product.description}\n\n`;
-          
-          if (discountPercent > 0) {
-            message += `💰 Цена: ~~${originalPriceRub}₽~~ *${discountedPriceRub}₽*\n`;
-            message += `💎 Цена в куражиках: ~~${originalPriceKur}~~ *${discountedPriceKur}*\n`;
-            message += `🏷 Скидка: ${discountPercent}%\n`;
-          } else {
-            message += `💰 Цена: ${originalPriceRub}₽\n`;
-            message += `💎 Цена в куражиках: ${originalPriceKur}\n`;
-          }
-          
-          message += `📊 В наличии: ${product.stock} шт.\n`;
-
-          const keyboard = [
-            [
-              { text: '💳 Купить за деньги', callback_data: `buy_product_money_${productId}` },
-              { text: '💎 Купить за куражики', callback_data: `buy_product_kurajiki_${productId}` }
-            ],
-            [{ text: '🔙 Назад в маркетплейс', callback_data: 'marketplace' }]
-          ];
-
-          if (product.imageId) {
-            await ctx.replyWithPhoto(product.imageId, {
-              caption: message,
-              parse_mode: 'Markdown',
-              reply_markup: { inline_keyboard: keyboard }
-            });
-          } else {
-            await ctx.reply(message, {
-              parse_mode: 'Markdown',
-              reply_markup: { inline_keyboard: keyboard }
-            });
-          }
         } catch (error) {
-          console.error('Ошибка при просмотре товара:', error);
+          console.error('Ошибка при обработке поста:', error);
           await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
         }
         break;
 
-      case data.match(/^buy_product_(money|kurajiki)_(\d+)/)?.[0]:
-        const [, productPaymentType, productId] = data.split('_');
-        if (productPaymentType === 'money') {
-          require('./buyProduct')(ctx);
-        } else {
-          require('./buyProductWithKurajiki')(ctx);
-        }
-        break;
-
-      case data.match(/^product_given_(\d+)_(\d+)/)?.[0]:
-        if (userRole === 'admin' || userRole === 'superadmin') {
-          try {
-            const [, userId, productId] = data.split('_');
-            const adminUsername = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name;
-
-            // Обновляем сообщение, добавляя информацию о выдаче товара
-            await ctx.editMessageText(
-              ctx.update.callback_query.message.text + 
-              `\n\n✅ Товар выдан администратором ${adminUsername}`,
-              {
-                parse_mode: 'HTML',
-                reply_markup: {
-                  inline_keyboard: [] // Убираем кнопку после нажатия
-                }
-              }
-            );
-
-            // Уведомляем покупателя
-            await ctx.telegram.sendMessage(
-              userId,
-              '✅ Ваш товар готов к выдаче! Администратор свяжется с вами в ближайшее время.'
-            );
-
-            // Отправляем служебное общение в админский чат
-            if (ctx.chat.id.toString() !== process.env.ADMIN_CHAT_ID) {
-              await ctx.telegram.sendMessage(
-                process.env.ADMIN_CHAT_ID,
-                `📦 Заказ взят в работу\n` +
-                `Администратор: ${adminUsername}\n` +
-                `Покупатель ID: ${userId}\n` +
-                `Товар ID: ${productId}`
-              );
-            }
-
-          } catch (error) {
-            console.error('Ошибка при обработке выдачи товара:', error);
-            // Отправляем сообщение об ошибке в личку админу, а не в чат
-            await ctx.telegram.sendMessage(
-              ctx.from.id,
-              'Произошла ошибка при обработке выдачи товара, но статус заказа обновлен'
-            );
-          }
-        } else {
-          await ctx.reply('У вас нет доступа к управлению заказами');
-        }
-        break;
-
-      case 'show_catalog':
+      case data.match(/^approve_post_(\d+)_([a-z]+)$/)?.[0]:
         try {
-          const products = await prisma.product.findMany({
-            where: { stock: { gt: 0 } }
-          });
-
-          if (products.length === 0) {
-            return ctx.editMessageText('В каталоге пока нет доступных товаров', {
-              reply_markup: {
-                inline_keyboard: [
-                  [{ text: '🔙 Назад', callback_data: 'marketplace' }]
-                ]
-              }
-            });
+          // Используем правильное регулярное выражение для извлечения данных
+          const match = data.match(/^approve_post_(\d+)_([a-z]+)$/);
+          if (!match) {
+            console.error('Неверный формат callback_data:', data);
+            await ctx.reply('Ошибка: неверный формат данных');
+            return;
           }
 
-          // Сначала удаляем текущее сообщение
-          await ctx.deleteMessage();
-
-          // Отправляем каждый товар отдельным сообщением с фото
-          for (const product of products) {
-            let message = `📦 *${product.name}*\n\n`;
-            if (product.description) {
-              message += `📝 ${product.description}\n\n`;
-            }
-            message += `💰 Цена: ${product.priceRub}₽\n`;
-            message += `💎 Цена в куражиках: ${product.priceKur}\n`;
-            message += `📊 В наличии: ${product.stock} шт.\n`;
-
-            const keyboard = {
-              inline_keyboard: [
-                [
-                  { text: '💳 Купить за деньги', callback_data: `buy_product_money_${product.id}` },
-                  { text: '💎 Купить за куражики', callback_data: `buy_product_kurajiki_${product.id}` }
-                ]
-              ]
-            };
-
-            if (product.imageId) {
-              await ctx.replyWithPhoto(product.imageId, {
-                caption: message,
-                parse_mode: 'Markdown',
-                reply_markup: keyboard
-              });
-            } else {
-              await ctx.reply(message, {
-                parse_mode: 'Markdown',
-                reply_markup: keyboard
-              });
-            }
-          }
-
-          // В конце добавляем кнопку возврата
-          await ctx.reply('Для возврата нажмите кнопку ниже:', {
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '🔙 Вернуться в маркетплейс', callback_data: 'marketplace' }]
-              ]
-            }
-          });
-
-        } catch (error) {
-          console.error('Ошибка при отображении каталога:', error);
-          await ctx.reply('Произошла ошибка при загрузке каталога.');
-        }
-        break;
-
-      case 'referral_program':
-        try {
-          const user = await prisma.user.findUnique({
-            where: { telegramId: ctx.from.id }
-          });
+          const [, userId, network] = match;
+          console.log('Полученный userId:', userId, 'Тип:', typeof userId);
+          console.log('Полученный network:', network);
           
-          if (user) {
-            const referrals = await prisma.referral.findMany({
-              where: { referrerId: user.id },
-              include: { user: true }
-            });
-
-            let message = '📊 *Подробная статистика рефералов:*\n\n';
-            
-            if (referrals.length > 0) {
-              message += '*Рефералы первого уровня:*\n';
-              referrals.forEach((ref, index) => {
-                const username = ref.user.telegramId;
-                message += `${index + 1}. ID: ${username}\n`;
-              });
-            } else {
-              message += 'У вас пока нет рефералов\n';
-            }
-
-            await ctx.editMessageText(message, {
-              parse_mode: 'Markdown',
-              reply_markup: {
-                inline_keyboard: [
-                  [{ text: '🔗 Получить реферальную ссылку', callback_data: 'copy_referral_link' }],
-                  [{ text: '🔙 В меню', callback_data: 'open_menu' }]
-                ]
-              }
-            });
-          }
-        } catch (error) {
-          console.error('Ошибка при показе реферальной программы:', error);
-          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
-        }
-        break;
-
-      case 'copy_referral_link':
-        try {
-          const botUsername = process.env.BOT_USERNAME || 'studiokp_bot';
-          const referralLink = `https://t.me/${botUsername}?start=${ctx.from.id}`;
-          
-          await ctx.editMessageText(
-            '🔗 Вот ваша реферальная ссылка:\n\n' +
-            `\`${referralLink}\`\n\n` +
-            'Скопируйте её и отправьте друзьям!',
-            {
-              parse_mode: 'Markdown',
-              reply_markup: {
-                inline_keyboard: [
-                  [{ text: '🔙 Назад', callback_data: 'referral_program' }]
-                ]
-              }
-            }
-          );
-        } catch (error) {
-          console.error('Ошибка при копировании реферальной ссылки:', error);
-          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
-        }
-        break;
-
-      case data.match(/^view_game_(\d+)/)?.[0]:
-        try {
-          const gameId = parseInt(data.split('_')[2]);
-          const game = await prisma.game.findUnique({
-            where: { id: gameId }
-          });
-
-          if (!game) {
-            return ctx.editMessageText('Игра не найдена', {
-              reply_markup: {
-                inline_keyboard: [
-                  [{ text: '🔙 К списку игр', callback_data: 'games' }]
-                ]
-              }
-            });
-          }
-
-          let message = `🎮 *${game.title}*\n\n`;
-          if (game.description) {
-            message += `📝 ${game.description}\n\n`;
-          }
-          message += `📅 Дата: ${game.date.toLocaleDateString()}\n`;
-          message += `⏰ Вемя: ${game.date.toLocaleTimeString()}\n`;
-          message += `📍 Место: ${game.location}\n`;
-          message += `💰 Цена: ${game.priceRub}₽ / ${game.priceKur} куражиков\n`;
-          message += `👥 Свободных мест: ${game.seats}\n`;
-
-          const keyboard = [
-            [
-              { text: '💳 Оплатить деньгами', callback_data: `pay_game_money_${gameId}` },
-              { text: '💎 Оплатить куражиками', callback_data: `pay_game_kurajiki_${gameId}` }
-            ],
-            [{ text: '🔙 К списку игр', callback_data: 'games' }]
-          ];
-
-          if (game.imageId) {
-            await ctx.replyWithPhoto(game.imageId, {
-              caption: message,
-              parse_mode: 'Markdown',
-              reply_markup: { inline_keyboard: keyboard }
-            });
-          } else {
-            await ctx.editMessageText(message, {
-              parse_mode: 'Markdown',
-              reply_markup: { inline_keyboard: keyboard }
-            });
-          }
-        } catch (error) {
-          console.error('Ошибка при просмотре игры:', error);
-          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
-        }
-        break;
-
-      case data.match(/^pay_game_(money|kurajiki)_(\d+)/)?.[0]:
-        try {
-          const [action, paymentType, gameId] = data.split('_');
-          console.log('Тип оплаты:', paymentType);
-          console.log('ID игры:', gameId);
-
-          // Получаем информацию об игре
-          const game = await prisma.game.findUnique({
-            where: { 
-              id: parseInt(gameId) 
-            },
-            include: {
-              creator: true
-            }
-          });
-
-          if (!game) {
-            return ctx.reply('Игр не надена');
-          }
-
-          // Проверяем, кто создал игру (админ или партнер)
-          const isAdminGame = game.creator.role === 'admin' || game.creator.role === 'superadmin';
-
-          if (paymentType === 'money') {
-            if (isAdminGame) {
-              // Для игр от админа - оплата через Robokassa
-              await require('./payGame')(ctx, gameId);
-            } else {
-              // Для игр от партнера - показываем платежные данные
-              const paymentMessage = 
-                `💳 Оплата игры "${game.title}"\n\n` +
-                `Сумма к оплате: ${game.priceRub}₽\n\n` +
-                `Способ оплаты: ${game.paymentType === 'card' ? 'Банковская карта' : 'Телефон'}\n` +
-                `Реквизиты: ${game.paymentDetails}\n\n` +
-                `После оплаты отправьте чек организатору: @${game.creator.username || 'отсутствует'}`;
-
-              await ctx.reply(paymentMessage, {
-                reply_markup: {
-                  inline_keyboard: [
-                    [{ text: '✅ Я оплатил(а)', callback_data: `confirm_game_payment_${gameId}` }],
-                    [{ text: '🔙 Назад', callback_data: `view_game_${gameId}` }]
-                  ]
-                }
-              });
-            }
-          } else if (paymentType === 'kurajiki') {
-            // Оплата ��уражиками с переводом создателю игры
-            await require('./payGameWithKurajiki')(ctx, gameId);
-          }
-        } catch (error) {
-          console.error('Ошибка при обработке оплаты:', error);
-          await ctx.reply('Произошла ошибка при оплате. Пожалуйста, попробуйте позже.');
-        }
-        break;
-
-      case data.match(/^confirm_game_payment_(\d+)/)?.[0]:
-        try {
-          const gameId = parseInt(data.split('_')[3]);
-          const game = await prisma.game.findUnique({
-            where: { id: gameId },
-            include: { creator: true }
-          });
-
-          if (!game) {
-            return ctx.reply('Игра не найдена');
-          }
-
-          // Уведомляем организатора о новй оплате
-          const paymentMessage = 
-            `💰 Новая плата за игру!\n\n` +
-            `Игра: ${game.title}\n` +
-            `Дата: ${game.date.toLocaleDateString()}\n` +
-            `Сумма: ${game.priceRub}₽\n` +
-            `Участник: ${ctx.from.first_name} ${ctx.from.last_name || ''}\n` +
-            `Username: @${ctx.from.username || 'отсутствует'}\n` +
-            `ID: ${ctx.from.id}`;
-
-          await ctx.telegram.sendMessage(game.creator.telegramId, paymentMessage, {
-            parse_mode: 'HTML',
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '✅ Подтвердить оплату', callback_data: `approve_game_payment_${ctx.from.id}_${gameId}` }],
-                [{ text: '❌ Отклонить оплату', callback_data: `reject_game_payment_${ctx.from.id}_${gameId}` }]
-              ]
-            }
-          });
-
-          await ctx.reply(
-            'Информация об оплате оправлена организатору. Ожидайте подтверждения.',
-            {
-              reply_markup: {
-                inline_keyboard: [
-                  [{ text: '🔄 К списку игр', callback_data: 'games' }]
-                ]
-              }
-            }
-          );
-        } catch (error) {
-          console.error('Ошибка при подтверждении оплаты:', error);
-          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
-        }
-        break;
-
-      case data.match(/^game_contact_(\d+)/)?.[0]:
-        try {
-          const gameId = parseInt(data.split('_')[2]);
-          const game = await prisma.game.findUnique({
-            where: { id: gameId },
-            include: {
-              creator: true
-            }
-          });
-
-          if (!game) {
-            return ctx.reply('Игра не найдена');
-          }
-
-          // Уведомляем партнера о новой заявке
-          const contactMessage = 
-            `🎮 Новая заявка на игру!\n\n` +
-            `Игра: ${game.title}\n` +
-            `Дата: ${game.date.toLocaleDateString()}\n` +
-            `Участник: ${ctx.from.first_name} ${ctx.from.last_name || ''}\n` +
-            `Username: @${ctx.from.username || 'отсутствует'}\n` +
-            `ID: ${ctx.from.id}`;
-
-          await ctx.telegram.sendMessage(game.creator.telegramId, contactMessage, {
-            parse_mode: 'HTML',
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '✅ Подтвердить участие', callback_data: `confirm_game_participation_${ctx.from.id}_${gameId}` }]
-              ]
-            }
-          });
-
-          await ctx.reply(
-            'Ваша заявка отправлена организатору игры. Ожидайте подтверждения.',
-            {
-              reply_markup: {
-                inline_keyboard: [
-                  [{ text: '🔙 К списку игр', callback_data: 'games' }]
-                ]
-              }
-            }
-          );
-        } catch (error) {
-          console.error('Ошибка при обработке контактных данных:', error);
-          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
-        }
-        break;
-
-      case data.match(/^approve_post_(\d+)_(\w+)/)?.[0]:
-        try {
-          const [, userId, network] = data.split('_');
           const adminUsername = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name;
           const originalMessage = ctx.callbackQuery.message.caption;
 
@@ -1015,42 +520,63 @@ module.exports = async (ctx) => {
             return ctx.reply('Ошибка: не удалось получить текст сообщения');
           }
 
+          // Получаем актуальное значение вознаграждения
+          const reward = await prisma.socialMediaReward.findUnique({
+            where: { platform: network }
+          });
+
+          // Определяем сумму вознаграждения
+          const rewardAmount = reward?.amount || {
+            vk: 300,
+            instagram: 300,
+            telegram: 200,
+            ok: 200
+          }[network];
+
           // Обновляем сообщение, добавляя информацию о подтверждении
           await ctx.editMessageCaption(
             `${originalMessage}\n\n✅ Пост подтвержден администратором ${adminUsername}`,
             {
               reply_markup: {
-                inline_keyboard: [] // Убираем кнпки после подтверждения
+                inline_keyboard: []
               }
             }
           );
 
-          // Начисляем куражики пользователю
-          const rewards = {
-            vk: 300,
-            instagram: 300,
-            telegram: 200,
-            ok: 200
-          };
+          try {
+            // Проверяем и очищаем userId от возможных нечисловых символов
+            const cleanUserId = userId.toString().replace(/\D/g, '');
+            console.log('Очищенный userId:', cleanUserId);
+            
+            if (!cleanUserId) {
+              throw new Error('Invalid userId format');
+            }
 
-          // Преобразуем userId в BigInt для поиска в базе
-          const telegramId = BigInt(userId);
-          const user = await prisma.user.findUnique({
-            where: { telegramId }
-          });
+            // Преобразуем userId в BigInt с проверкой
+            const telegramId = BigInt(cleanUserId);
+            console.log('Преобразованный telegramId:', telegramId.toString());
 
-          if (user) {
+            const user = await prisma.user.findUnique({
+              where: { telegramId }
+            });
+
+            if (!user) {
+              console.log('Пользователь не найден для telegramId:', telegramId.toString());
+              await ctx.reply('Пользователь не найден');
+              return;
+            }
+
             // Обновляем баланс пользователя
             const updatedUser = await prisma.user.update({
               where: { id: user.id },
-              data: { balance: { increment: rewards[network] } }
+              data: { balance: { increment: rewardAmount } }
             });
 
             // Уведомляем пользователя о начислении куражиков
             await ctx.telegram.sendMessage(
-              userId,
+              cleanUserId,
               `✅ Ваш пост подтвержден!\n` +
-              `Вам начислено ${rewards[network]} куражиков.\n` +
+              `Вам начислено ${rewardAmount} куражиков.\n` +
               `Ваш текущий баланс: ${updatedUser.balance} куражиков`,
               {
                 reply_markup: {
@@ -1060,6 +586,15 @@ module.exports = async (ctx) => {
                 }
               }
             );
+          } catch (error) {
+            console.error('Ошибка при обработке userId:', error);
+            console.error('Детали ошибки:', {
+              originalUserId: userId,
+              type: typeof userId,
+              networkType: network,
+              callbackData: data
+            });
+            await ctx.reply('Ошибка при обработке ID пользователя');
           }
         } catch (error) {
           console.error('Ошибка при подтверждении поста:', error);
@@ -1087,7 +622,7 @@ module.exports = async (ctx) => {
           await ctx.telegram.sendMessage(
             userId,
             '❌ К сожалению, ваш пост не прошел проверку.\n' +
-            'Пожалуй��та, убедтесь, чт пост соответствует требованиям и попробуйте снова.',
+            'Пожалуйста, убедитесь, что пост соответствует требованиям и попробуйте снова.',
             {
               reply_markup: {
                 inline_keyboard: [
@@ -1278,7 +813,7 @@ module.exports = async (ctx) => {
 
           await ctx.scene.enter('edit_game_scene', { promptMessage });
         } catch (error) {
-          console.error('Ошибка при редактировани�� параметра игры:', error);
+          console.error('Ошибка при редактировании параметра игры:', error);
           await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
         }
         break;
@@ -1487,7 +1022,7 @@ module.exports = async (ctx) => {
                 participant.telegramId.toString(),
                 `❌ Важное уведомление!\n\n` +
                 `Мероприятие "${event.title}" отменено.\n` +
-                `📅 Д��та: ${event.date.toLocaleDateString()}\n` +
+                `📅 Дата: ${event.date.toLocaleDateString()}\n` +
                 `⏰ Время: ${event.date.toLocaleTimeString()}\n` +
                 `📍 Место: ${event.location}\n` +
                 (event.priceKur > 0 ? 
@@ -1513,7 +1048,7 @@ module.exports = async (ctx) => {
             {
               reply_markup: {
                 inline_keyboard: [
-                  [{ text: '🔙 Вернуть��я к управлению мероприятиями', callback_data: 'manage_events' }]
+                  [{ text: '🔙 Вернуться к управлению мероприятиями', callback_data: 'manage_events' }]
                 ]
               }
             }
@@ -2132,6 +1667,59 @@ module.exports = async (ctx) => {
         
         await ctx.reply('✅ Рассылка успешно отменена');
         await ctx.answerCbQuery();
+        break;
+
+      case 'help':
+        try {
+          const message = 
+            '*❓ Помощь и поддержка*\n\n' +
+            'Если у вас возникли вопросы или нужна помощь, вы можете связаться с администратором:\n\n' +
+            '👨‍💼 Администратор: @Sazonovbt\n' +
+            '🌐 Сайт компании: kuraj-prodaj.com\n\n' +
+            'Будем рады помочь вам! 😊';
+
+          const keyboard = [
+            [{ text: '📱 Написать администратору', url: 'https://t.me/Sazonovbt' }],
+            [{ text: '🔙 В меню', callback_data: 'open_menu' }]
+          ];
+
+          await ctx.editMessageText(message, {
+            parse_mode: 'Markdown',
+            reply_markup: { inline_keyboard: keyboard },
+            disable_web_page_preview: true
+          });
+        } catch (error) {
+          console.error('Ошибка в разделе помощи:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      case data.match(/^set_reward_(telegram|instagram|vk|ok)$/)?.[0]:
+        try {
+          const platform = data.split('_')[2];
+          
+          // Сохраняем в сессии информацию о выбранной платформе
+          ctx.session = {
+            ...ctx.session,
+            settingRewardFor: platform
+          };
+
+          // Получаем текущее значение вознаграждения
+          const currentReward = await prisma.socialMediaReward.findUnique({
+            where: { platform }
+          });
+
+          const message = 
+            `*Установка вознаграждения для ${platform}*\n\n` +
+            `Текущее значение: ${currentReward?.amount || 0} куражиков\n\n` +
+            'Введите новое значение вознаграждения в куражиках:';
+
+          // Входим в сцену установки вознаграждения
+          await ctx.scene.enter('set_reward_scene', { message });
+        } catch (error) {
+          console.error('Ошибка при установке вознаграждения:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
         break;
 
       default:
