@@ -5,7 +5,10 @@ const cron = require('node-cron');
 // Функция для отправки уведомлений всем пользователям о новой игре
 async function notifyAllUsersAboutNewGame(ctx, game) {
   try {
+    console.log('Начинаем отправку уведомлений о новой игре:', game.title);
     const users = await prisma.user.findMany();
+    console.log(`Найдено ${users.length} пользователей для отправки уведомлений`);
+    
     const message = `🎮 *Новая игра!*\n\n` +
       `*${game.title}*\n\n` +
       `📅 Дата: ${game.date.toLocaleDateString()}\n` +
@@ -14,26 +17,48 @@ async function notifyAllUsersAboutNewGame(ctx, game) {
       `💰 Цена: ${game.priceRub}₽ / ${game.priceKur} куражиков\n` +
       `👥 Количество мест: ${game.seats}`;
 
+    console.log('Подготовлено сообщение для отправки:', message);
+
     for (const user of users) {
       try {
         // Не отправляем уведомление создателю игры
-        if (user.telegramId.toString() === ctx.from.id.toString()) continue;
+        if (user.telegramId.toString() === ctx.from.id.toString()) {
+          console.log(`Пропускаем отправку создателю игры: ${user.telegramId}`);
+          continue;
+        }
         
-        await ctx.telegram.sendMessage(user.telegramId.toString(), message, {
-          parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '👀 Подробнее', callback_data: `view_game_${game.id}` }]
-            ]
-          }
-        });
+        // Проверяем, что telegramId существует и валиден
+        if (!user.telegramId) {
+          console.log(`Пропускаем пользователя без telegramId: ${user.id}`);
+          continue;
+        }
+
+        console.log(`Отправка уведомления пользователю ${user.telegramId}`);
+        try {
+          await ctx.telegram.sendMessage(user.telegramId.toString(), message, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '👀 Подробнее', callback_data: `view_game_${game.id}` }]
+              ]
+            }
+          });
+          console.log(`Уведомление успешно отправлено пользователю ${user.telegramId}`);
+        } catch (sendError) {
+          console.error(`Ошибка отправки сообщения пользователю ${user.telegramId}:`, sendError.message);
+          // Если пользователь заблокировал бота или другая ошибка отправки,
+          // продолжаем работу с следующим пользователем
+          continue;
+        }
         
         // Добавляем задержку между отправками
         await new Promise(resolve => setTimeout(resolve, 50));
       } catch (error) {
-        console.error(`Ошибка отправки уведомления пользователю ${user.telegramId}:`, error);
+        console.error(`Ошибка обработки пользователя ${user.telegramId}:`, error);
+        continue;
       }
     }
+    console.log('Завершена отправка уведомлений о новой игре');
   } catch (error) {
     console.error('Ошибка массовой рассылки:', error);
   }

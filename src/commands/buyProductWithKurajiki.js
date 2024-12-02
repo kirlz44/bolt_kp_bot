@@ -1,10 +1,8 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-module.exports = async (ctx) => {
+module.exports = async (ctx, productId) => {
   try {
-    // Получаем ID товара из callback_data
-    const productId = parseInt(ctx.callbackQuery.data.split('_')[3]);
     const userId = ctx.from.id;
 
     // Получаем информацию о товаре и пользователе

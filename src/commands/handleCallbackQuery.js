@@ -60,7 +60,7 @@ async function handleQualification(ctx, qualificationNumber) {
       });
 
       // Показываем основное меню
-      require('./menu')(ctx);
+      await require('./menu')(ctx);
     }
   } catch (error) {
     console.error('Ошибка при обработке квалификации:', error);
@@ -211,6 +211,77 @@ module.exports = async (ctx) => {
         }
         break;
 
+      // Обработчик для просмотра каталога товаров
+      case 'show_catalog':
+        try {
+          const products = await prisma.product.findMany({
+            where: {
+              stock: {
+                gt: 0
+              }
+            }
+          });
+
+          if (products.length === 0) {
+            return ctx.reply('На данный момент нет доступных товаров', {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🔙 В меню', callback_data: 'open_menu' }]
+                ]
+              }
+            });
+          }
+
+          // Отправляем каждый товар отдельным сообщением
+          for (const product of products) {
+            let message = `📦 *${product.name}*\n\n`;
+            if (product.description) {
+              message += `📝 ${product.description}\n\n`;
+            }
+            message += `💰 Цена: ${product.priceRub}₽ / ${product.priceKur} куражиков\n`;
+            message += `📊 В наличии: ${product.stock} шт.\n`;
+
+            const keyboard = {
+              inline_keyboard: [
+                [
+                  { text: '💳 Купить за рубли', callback_data: `buy_product_money_${product.id}` },
+                  { text: '💎 Купить за куражики', callback_data: `buy_product_kurajiki_${product.id}` }
+                ]
+              ]
+            };
+
+            if (product.imageId) {
+              await ctx.replyWithPhoto(product.imageId, {
+                caption: message,
+                parse_mode: 'Markdown',
+                reply_markup: keyboard
+              });
+            } else {
+              await ctx.reply(message, {
+                parse_mode: 'Markdown',
+                reply_markup: keyboard
+              });
+            }
+
+            // Добавляем небольшую задержку между сообщениями
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+
+          // В конце отправляем кнопку возврата
+          await ctx.reply('Выберите товар для покупки:', {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔙 Вернуться в маркетплейс', callback_data: 'marketplace' }]
+              ]
+            }
+          });
+
+        } catch (error) {
+          console.error('Ошибка при показе каталога:', error);
+          await ctx.reply('Произошла ошибка при загрузке товаров. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
       case 'games':
         try {
           const games = await prisma.game.findMany({
@@ -324,7 +395,186 @@ module.exports = async (ctx) => {
         break;
 
       case 'manage_products':
-        require('./manageProducts')(ctx);
+        try {
+          if (userRole !== 'admin' && userRole !== 'superadmin') {
+            return ctx.reply('У вас нет доступа к управлению товарами');
+          }
+
+          const products = await prisma.product.findMany();
+          let message = '*Управление товарами*\n\n';
+
+          if (products.length > 0) {
+            message += 'Текущие товары:\n\n';
+            products.forEach(product => {
+              message += `📦 ${product.name}\n`;
+              message += `💰 ${product.priceRub}₽ / ${product.priceKur} куражиков\n`;
+              message += `📊 На складе: ${product.stock} шт.\n\n`;
+            });
+          } else {
+            message += 'Товары отсутствуют\n';
+          }
+
+          const keyboard = [
+            [{ text: '➕ Добавить товар', callback_data: 'add_product' }],
+            [{ text: '📋 Список товаров', callback_data: 'list_products' }],
+            [{ text: '✏️ Редактировать товар', callback_data: 'edit_products' }],
+            [{ text: '❌ Удалить товар', callback_data: 'delete_product' }],
+            [{ text: '🔙 Назад', callback_data: 'admin_panel' }]
+          ];
+
+          if (ctx.callbackQuery) {
+            await ctx.editMessageText(message, {
+              parse_mode: 'Markdown',
+              reply_markup: { inline_keyboard: keyboard }
+            });
+          } else {
+            await ctx.reply(message, {
+              parse_mode: 'Markdown',
+              reply_markup: { inline_keyboard: keyboard }
+            });
+          }
+        } catch (error) {
+          console.error('Ошибка в управлении товарами:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      case 'add_product':
+        if (userRole === 'admin' || userRole === 'superadmin') {
+          await ctx.scene.enter('add_product_scene');
+        } else {
+          await ctx.reply('У вас нет доступа к добавлению товаров');
+        }
+        break;
+
+      case 'edit_products':
+        if (userRole === 'admin' || userRole === 'superadmin') {
+          await ctx.scene.enter('edit_product_scene');
+        } else {
+          await ctx.reply('У вас нет доступа к редактированию товаров');
+        }
+        break;
+
+      case 'delete_product':
+        if (userRole === 'admin' || userRole === 'superadmin') {
+          const products = await prisma.product.findMany();
+          const keyboard = products.map(product => ([{
+            text: product.name,
+            callback_data: `confirm_delete_product_${product.id}`
+          }]));
+          keyboard.push([{ text: '🔙 Отмена', callback_data: 'manage_products' }]);
+          
+          await ctx.reply('Выберите товар для удаления:', {
+            reply_markup: { inline_keyboard: keyboard }
+          });
+        } else {
+          await ctx.reply('У вас нет доступа к удалению товаров');
+        }
+        break;
+
+      case data.match(/^confirm_delete_product_(\d+)/)?.[0]:
+        try {
+          if (userRole !== 'admin' && userRole !== 'superadmin') {
+            return ctx.reply('У вас нет доступа к удалению товаров');
+          }
+
+          const productId = parseInt(data.split('_')[3]);
+          await prisma.product.delete({
+            where: { id: productId }
+          });
+          await ctx.reply('✅ Товар успешно удален!', {
+            reply_markup: {
+              inline_keyboard: [[{ text: '🔙 Назад к управлению товарами', callback_data: 'manage_products' }]]
+            }
+          });
+        } catch (error) {
+          console.error('Ошибка при удалении товара:', error);
+          await ctx.reply('Произошла ошибка при удалении товара. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      case 'list_products':
+        try {
+          const products = await prisma.product.findMany();
+          let message = '*📋 Список товаров*\n\n';
+          
+          if (products.length > 0) {
+            products.forEach(product => {
+              message += `📦 *${product.name}*\n`;
+              message += `📝 ${product.description}\n`;
+              message += `💰 Цена: ${product.priceRub}₽ / ${product.priceKur} куражиков\n`;
+              message += `📊 На складе: ${product.stock} шт.\n\n`;
+            });
+          } else {
+            message += 'Товары отсутствуют';
+          }
+          
+          await ctx.reply(message, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'manage_products' }]]
+            }
+          });
+        } catch (error) {
+          console.error('Ошибка при получении списка товаров:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      // Обработчик покупки товара за куражики
+      case data.match(/^buy_product_kurajiki_(\d+)/)?.[0]:
+        const buyProductId = parseInt(data.split('_')[3]);
+        await require('./buyProductWithKurajiki')(ctx, buyProductId);
+        break;
+
+      // Обработчик подтверждения выдачи товара
+      case data.match(/^product_given_(\d+)_(\d+)/)?.[0]:
+        try {
+          // Используем регулярное выражение для извлечения userId и productId
+          const matches = data.match(/^product_given_(\d+)_(\d+)$/);
+          if (!matches) {
+            throw new Error('Неверный формат callback_data');
+          }
+
+          const [, buyerUserId, productId] = matches;
+          const adminUsername = ctx.from.username || ctx.from.first_name;
+
+          // Получаем оригинальное сообщение
+          const originalMessage = ctx.callbackQuery.message.text;
+
+          // Обновляем сообщение, добавляя информацию о подтверждении
+          await ctx.editMessageText(
+            `${originalMessage}\n\n✅ Товар выдан администратором @${adminUsername}`,
+            {
+              parse_mode: 'HTML',
+              reply_markup: {
+                inline_keyboard: []  // Убираем кнопку после подтверждения
+              }
+            }
+          );
+
+          // Получаем информацию о покупателе
+          const buyer = await prisma.user.findUnique({
+            where: { telegramId: BigInt(buyerUserId) }
+          });
+
+          if (buyer) {
+            // Отправляем уведомление покупателю
+            try {
+              await ctx.telegram.sendMessage(
+                Number(buyer.telegramId),
+                '✅ Администратор отметил ваш товар как выданный. Спасибо за покупку!'
+              );
+            } catch (sendError) {
+              console.error('Ошибка при отправке уведомления покупателю:', sendError);
+              await ctx.reply('Не удалось отправить уведомление покупателю, но товар отмечен как выданный.');
+            }
+          }
+
+        } catch (error) {
+          console.error('Ошибка при подтверждении выдачи товара:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
         break;
 
       case 'manage_games':
@@ -386,7 +636,7 @@ module.exports = async (ctx) => {
             }
           });
         } else {
-          await ctx.reply('У вас нет досту����а к упр��в��ению призами');
+          await ctx.reply('У вас нет доступа к упрвению призами');
         }
         break;
 
@@ -556,14 +806,21 @@ module.exports = async (ctx) => {
             const telegramId = BigInt(cleanUserId);
             console.log('Преобразованный telegramId:', telegramId.toString());
 
-            const user = await prisma.user.findUnique({
+            let user = await prisma.user.findUnique({
               where: { telegramId }
             });
 
+            // Если пользователь не найден, создаем его
             if (!user) {
-              console.log('Пользователь не найден для telegramId:', telegramId.toString());
-              await ctx.reply('Пользователь не найден');
-              return;
+              console.log('Создаем нового пользователя с telegramId:', telegramId.toString());
+              user = await prisma.user.create({
+                data: {
+                  telegramId,
+                  role: 'user',
+                  balance: 0
+                }
+              });
+              console.log('Создан новый пользователь:', user);
             }
 
             // Обновляем баланс пользователя
@@ -754,7 +1011,7 @@ module.exports = async (ctx) => {
             [{ text: '📅 Дата и время', callback_data: `edit_game_date_${gameId}` }],
             [{ text: '📍 Место проведения', callback_data: `edit_game_location_${gameId}` }],
             [{ text: '💰 Цена', callback_data: `edit_game_price_${gameId}` }],
-            [{ text: '👥 Количество мест', callback_data: `edit_game_seats_${gameId}` }],
+            [{ text: '🔢 Количество мест', callback_data: `edit_game_seats_${gameId}` }],
             [{ text: '📝 Описание', callback_data: `edit_game_description_${gameId}` }],
             [{ text: '🖼 Изображение', callback_data: `edit_game_image_${gameId}` }],
             [{ text: '🔙 Назад', callback_data: 'edit_game' }]
@@ -1056,7 +1313,7 @@ module.exports = async (ctx) => {
 
         } catch (error) {
           console.error('Ошибка при удалении мероприятия:', error);
-          await ctx.reply('Произошла ошибка при удалении мер��приятия. Пожалуйста, попробуйте позже.');
+          await ctx.reply('Произошла ошибка при удалении мерприятия. Пожалуйста, попробуйте позже.');
         }
         break;
 
@@ -1250,7 +1507,7 @@ module.exports = async (ctx) => {
             }
 
             try {
-              // Списываем куражи��и и регистрируем участника
+              // Списываем куражики и регистрируем участника
               await prisma.$transaction([
                 prisma.user.update({
                   where: { id: user.id },
@@ -1299,7 +1556,7 @@ module.exports = async (ctx) => {
               await ctx.reply('Произошла ошибка при оплате. Пожалуйста, попробуйте позже.');
             }
           } else {
-            // Оплата чере�� Robokassa
+            // Оплата через Robokassa
             const isTestMode = process.env.ROBOKASSA_TEST_MODE === 'true';
             const paymentUrl = generatePaymentUrl(
               event.priceRub,
@@ -1314,7 +1571,7 @@ module.exports = async (ctx) => {
                 reply_markup: {
                   inline_keyboard: [
                     [{ text: '💳 Оплатить', url: paymentUrl }],
-                    [{ text: '🔙 Вернуться к мероприятию', callback_data: `view_event_${eventId}` }]
+                    [{ text: '🔙 Вернуться к меоприятию', callback_data: `view_event_${eventId}` }]
                   ]
                 }
               }
@@ -1711,7 +1968,7 @@ module.exports = async (ctx) => {
 
           const message = 
             `*Установка вознаграждения для ${platform}*\n\n` +
-            `Текуще�� значение: ${currentReward?.amount || 0} куражиков\n\n` +
+            `Текущее значение: ${currentReward?.amount || 0} куражиков\n\n` +
             'Введите новое значение вознаграждения в куражиках:';
 
           // Входим в сцену установки вознаграждения
@@ -1877,6 +2134,312 @@ module.exports = async (ctx) => {
         } catch (error) {
           console.error('Ошибка при получении статистики рефералов:', error);
           await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      case data.match(/^view_game_(\d+)/)?.[0]:
+        try {
+          const gameId = parseInt(data.split('_')[2]);
+          const userId = ctx.from.id;
+
+          const game = await prisma.game.findUnique({
+            where: { id: gameId },
+            include: {
+              creator: true,
+              participants: {
+                select: {
+                  id: true,
+                  telegramId: true,
+                  phoneNumber: true,
+                  role: true
+                }
+              }
+            }
+          });
+
+          if (!game) {
+            return ctx.reply('Игра не найдена');
+          }
+
+          let message = `🎮 *${game.title}*\n\n`;
+          message += `📝 ${game.description}\n`;
+          message += `📅 Дата: ${game.date.toLocaleDateString()}\n`;
+          message += `⏰ Время: ${game.date.toLocaleTimeString()}\n`;
+          message += `📍 Место: ${game.location}\n`;
+          message += `💰 Цена: ${game.priceRub}₽ / ${game.priceKur} куражиков\n`;
+          message += `👥 Свободных мест: ${game.seats - game.participants.length}\n\n`;
+
+          // Показываем список участников для админов и создателя
+          if (userRole === 'admin' || userRole === 'superadmin' || ctx.from.id === Number(game.creator.telegramId)) {
+            message += '*Список участников:*\n';
+            if (game.participants.length > 0) {
+              game.participants.forEach(participant => {
+                message += `- ${participant.phoneNumber || 'Нет телефона'} (@${participant.telegramId})\n`;
+              });
+            } else {
+              message += 'Пока нет участников\n';
+            }
+          }
+
+          const keyboard = [];
+          
+          // Проверяем, записан ли текущий пользователь на игру
+          const isParticipant = game.participants.some(p => Number(p.telegramId) === userId);
+          
+          if (isParticipant) {
+            // Если пользователь уже записан, показываем кнопку отмены
+            keyboard.push([
+              { text: '❌ Отменить запись', callback_data: `cancel_game_registration_${game.id}` }
+            ]);
+          } else if (game.seats > game.participants.length) {
+            // Если есть свободные места и пользователь не записан, показываем кнопки оплаты
+            keyboard.push([
+              { text: '💳 Оплатить рублями', callback_data: `pay_game_rub_${game.id}` },
+              { text: '💎 Оплатить куражиками', callback_data: `pay_game_kur_${game.id}` }
+            ]);
+          }
+
+          // Добавляем кнопки управления для создателя игры и админов
+          if (userRole === 'admin' || userRole === 'superadmin' || ctx.from.id === Number(game.creator.telegramId)) {
+            keyboard.push([
+              { text: '✏️ Редактировать', callback_data: `edit_game_${game.id}` },
+              { text: '❌ Отменить игру', callback_data: `cancel_game_${game.id}` }
+            ]);
+          }
+
+          keyboard.push([{ text: '🔙 К списку игр', callback_data: 'games' }]);
+
+          await ctx.reply(message, {
+            parse_mode: 'Markdown',
+            reply_markup: { inline_keyboard: keyboard }
+          });
+        } catch (error) {
+          console.error('Ошибка при просмотре игры:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      // Обработчик отмены регистрации на игру
+      case data.match(/^cancel_game_registration_(\d+)/)?.[0]:
+        try {
+          const gameId = parseInt(data.split('_')[3]);
+          const userId = ctx.from.id;
+
+          const [game, user] = await Promise.all([
+            prisma.game.findUnique({
+              where: { id: gameId },
+              include: {
+                creator: true,
+                participants: true
+              }
+            }),
+            prisma.user.findUnique({
+              where: { telegramId: userId }
+            })
+          ]);
+
+          if (!game || !user) {
+            return ctx.reply('Игра или пользователь не найдены');
+          }
+
+          // Отключаем пользователя от игры и возвращаем куражики
+          await prisma.$transaction([
+            prisma.user.update({
+              where: { id: user.id },
+              data: {
+                balance: { increment: game.priceKur },
+                participatingGames: {
+                  disconnect: { id: game.id }
+                }
+              }
+            }),
+            // Снимаем куражики у создателя игры
+            prisma.user.update({
+              where: { id: game.creatorId },
+              data: { balance: { decrement: game.priceKur } }
+            })
+          ]);
+
+          // Уведомляем пользователя
+          await ctx.reply(
+            `✅ Вы отменили запись на игру "${game.title}"\n` +
+            `${game.priceKur} куражиков возвращены на ваш баланс.`, {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🎮 К списку игр', callback_data: 'games' }]
+                ]
+              }
+            }
+          );
+
+          // Уведомляем создателя игры
+          await ctx.telegram.sendMessage(
+            Number(game.creator.telegramId),
+            `❌ Отмена регистрации на игру "${game.title}"\n` +
+            `Пользователь: ${ctx.from.first_name} ${ctx.from.last_name || ''}\n` +
+            `Username: @${ctx.from.username || 'отсутствует'}`
+          );
+
+        } catch (error) {
+          console.error('Ошибка при отмене регистрации:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      // Обновляем обработчик списка игр в админской панели
+      case 'manage_games':
+        try {
+          const games = await prisma.game.findMany({
+            include: {
+              creator: true,
+              participants: {
+                select: {
+                  telegramId: true,
+                  phoneNumber: true
+                }
+              }
+            },
+            orderBy: {
+              date: 'asc'
+            }
+          });
+
+          let message = '*Управление играми*\n\n';
+          
+          if (games.length > 0) {
+            games.forEach(game => {
+              message += `🎮 *${game.title}*\n`;
+              message += `📅 ${game.date.toLocaleDateString()} ${game.date.toLocaleTimeString()}\n`;
+              message += `📍 ${game.location}\n`;
+              message += `💰 ${game.priceRub}₽ / ${game.priceKur} куражиков\n`;
+              message += `👥 Участников: ${game.participants.length}/${game.seats}\n\n`;
+            });
+          } else {
+            message += 'Нет созданных игр\n';
+          }
+
+          const keyboard = [
+            [{ text: '➕ Создать игру', callback_data: 'create_game' }]
+          ];
+
+          // Добавляем кнопки для каждой игры
+          games.forEach(game => {
+            keyboard.push([{ 
+              text: `📋 ${game.title} (${game.participants.length}/${game.seats})`, 
+              callback_data: `view_game_${game.id}` 
+            }]);
+          });
+
+          keyboard.push([{ text: '🔙 Назад', callback_data: 'admin_panel' }]);
+
+          await ctx.editMessageText(message, {
+            parse_mode: 'Markdown',
+            reply_markup: { inline_keyboard: keyboard }
+          });
+        } catch (error) {
+          console.error('Ошибка при управлении играми:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      // Обработчик оплаты игры куражиками
+      case data.match(/^pay_game_kur_(\d+)/)?.[0]:
+        try {
+          const gameId = parseInt(data.split('_')[3]);
+          const userId = ctx.from.id;
+
+          // Получаем информацию об игре и пользователе
+          const [game, user] = await Promise.all([
+            prisma.game.findUnique({
+              where: { id: gameId },
+              include: {
+                creator: true,
+                participants: true
+              }
+            }),
+            prisma.user.findUnique({
+              where: { telegramId: userId }
+            })
+          ]);
+
+          if (!game) {
+            return ctx.reply('Игра не найдена');
+          }
+
+          if (!user) {
+            return ctx.reply('Пользователь не найден');
+          }
+
+          // Проверяем, есть ли свободные места
+          if (game.seats <= game.participants.length) {
+            return ctx.reply('К сожалению, все места уже заняты');
+          }
+
+          // Проверяем, не записан ли пользователь уже
+          const isAlreadyRegistered = game.participants.some(p => Number(p.telegramId) === userId);
+          if (isAlreadyRegistered) {
+            return ctx.reply('Вы уже записаны на эту игру');
+          }
+
+          // Проверяем баланс пользователя
+          if (user.balance < game.priceKur) {
+            return ctx.reply(
+              'Недостаточно куражиков для участия в игре.\n' +
+              `Необходимо: ${game.priceKur} куражиков\n` +
+              `Ваш баланс: ${user.balance} куражиков`, {
+                reply_markup: {
+                  inline_keyboard: [
+                    [{ text: '💰 Заработать куражики', callback_data: 'earn' }],
+                    [{ text: '🔙 Вернуться к игре', callback_data: `view_game_${gameId}` }]
+                  ]
+                }
+              }
+            );
+          }
+
+          // Списываем куражики и добавляем пользователя к участникам
+          await prisma.$transaction([
+            prisma.user.update({
+              where: { id: user.id },
+              data: { 
+                balance: { decrement: game.priceKur },
+                participatingGames: {
+                  connect: { id: game.id }
+                }
+              }
+            }),
+            // Начисляем куражики создателю игры
+            prisma.user.update({
+              where: { id: game.creatorId },
+              data: { balance: { increment: game.priceKur } }
+            })
+          ]);
+
+          // Уведомляем пользователя об успешной регистрации
+          await ctx.reply(
+            `✅ Вы успешно зарегистрировались на игру "${game.title}" за ${game.priceKur} куражиков!\n` +
+            'Создатель игры свяжется с вами для подтверждения участия.', {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🎮 К списку игр', callback_data: 'games' }]
+                ]
+              }
+            }
+          );
+
+          // Уведомляем создателя игры о новом участнике
+          await ctx.telegram.sendMessage(
+            Number(game.creator.telegramId),
+            `🎮 Новая регистрация на игру "${game.title}"!\n` +
+            `Получено: ${game.priceKur} куражиков\n` +
+            `От: ${ctx.from.first_name} ${ctx.from.last_name || ''}\n` +
+            `Username: @${ctx.from.username || 'отсутствует'}\n` +
+            `Телефон: ${user.phoneNumber || 'не указан'}`
+          );
+
+        } catch (error) {
+          console.error('Ошибка при оплате игры куражиками:', error);
+          await ctx.reply('Произошла ошибка при регистрации. Пожалуйста, попробуйте позже.');
         }
         break;
 

@@ -1,6 +1,7 @@
 const { Scenes } = require('telegraf');
 const { PrismaClient } = require('@prisma/client');
 const { validateDateTime } = require('../utils/dateValidation');
+const { notifyAllUsersAboutNewGame } = require('../services/notifications');
 const prisma = new PrismaClient();
 
 const addGameScene = new Scenes.WizardScene(
@@ -142,13 +143,21 @@ const addGameScene = new Scenes.WizardScene(
         ctx.scene.session.gameData.imageId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
       }
       
+      console.log('Попытка найти пользователя с ID:', ctx.from.id);
       const user = await prisma.user.findUnique({
-        where: { telegramId: ctx.from.id }
+        where: { telegramId: BigInt(ctx.from.id) }
       });
+      console.log('Найден пользователь:', user);
 
       if (!user) {
+        console.log('Пользователь не найден в базе данных');
         throw new Error('Пользователь не найден');
       }
+
+      console.log('Создание игры с данными:', {
+        ...ctx.scene.session.gameData,
+        creatorId: user.id
+      });
 
       const game = await prisma.game.create({
         data: {
@@ -158,6 +167,10 @@ const addGameScene = new Scenes.WizardScene(
           }
         }
       });
+      console.log('Игра успешно создана:', game);
+
+      // Отправляем уведомления всем пользователям
+      await notifyAllUsersAboutNewGame(ctx, game);
 
       await ctx.reply('✅ Игра успешно создана!');
       await ctx.scene.leave();
@@ -202,7 +215,7 @@ addGameScene.action('skip_image', async (ctx) => {
     await ctx.answerCbQuery();
     
     const user = await prisma.user.findUnique({
-      where: { telegramId: ctx.from.id }
+      where: { telegramId: BigInt(ctx.from.id) }
     });
 
     if (!user) {
@@ -217,6 +230,9 @@ addGameScene.action('skip_image', async (ctx) => {
         }
       }
     });
+
+    // Отправляем уведомления всем пользователям
+    await notifyAllUsersAboutNewGame(ctx, game);
 
     await ctx.reply('✅ Игра успешно создана!');
     await ctx.scene.leave();

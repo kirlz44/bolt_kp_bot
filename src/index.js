@@ -70,11 +70,30 @@ bot.on('contact', async (ctx) => {
     const contact = ctx.message.contact;
     
     if (contact.user_id === ctx.from.id) {
-      // Обновляем пользователя с новым номером телефона
-      await prisma.user.update({
-        where: { telegramId: BigInt(ctx.from.id) },
-        data: { phoneNumber: contact.phone_number }
+      // Проверяем существование пользователя
+      let user = await prisma.user.findUnique({
+        where: { telegramId: BigInt(ctx.from.id) }
       });
+
+      // Если пользователь не найден, создаем его
+      if (!user) {
+        console.log('Создаем нового пользователя с telegramId:', ctx.from.id);
+        user = await prisma.user.create({
+          data: {
+            telegramId: BigInt(ctx.from.id),
+            role: 'user',
+            balance: 0,
+            phoneNumber: contact.phone_number
+          }
+        });
+        console.log('Создан новый пользователь:', user);
+      } else {
+        // Обновляем пользователя с новым номером телефона
+        user = await prisma.user.update({
+          where: { telegramId: BigInt(ctx.from.id) },
+          data: { phoneNumber: contact.phone_number }
+        });
+      }
 
       await ctx.reply('✅ Спасибо! Ваш номер телефона сохранен.', {
         reply_markup: { remove_keyboard: true }

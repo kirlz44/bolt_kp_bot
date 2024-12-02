@@ -2,19 +2,25 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 async function getUserByTelegramId(telegramId) {
-  return await prisma.user.findUnique({
-    where: { telegramId }
+  console.log('Поиск пользователя с telegramId:', telegramId);
+  const user = await prisma.user.findUnique({
+    where: { telegramId: BigInt(telegramId) }
   });
+  console.log('Найден пользователь:', user);
+  return user;
 }
 
 async function createUser(telegramId, role = 'user') {
-  return await prisma.user.create({
+  console.log('Создание пользователя с telegramId:', telegramId, 'и ролью:', role);
+  const user = await prisma.user.create({
     data: {
-      telegramId,
+      telegramId: BigInt(telegramId),
       role,
-      balance: 0
+      balance: 1000
     }
   });
+  console.log('Создан пользователь:', user);
+  return user;
 }
 
 async function updateUserBalance(userId, amount) {
@@ -29,16 +35,26 @@ async function updateUserBalance(userId, amount) {
 }
 
 async function checkUserRole(telegramId) {
-  const superAdminId = parseInt(process.env.SUPER_ADMIN_ID);
+  console.log('Проверка роли для telegramId:', telegramId);
+  const superAdminId = BigInt(process.env.SUPER_ADMIN_ID);
+  const telegramIdBigInt = BigInt(telegramId);
   
-  if (telegramId === superAdminId) {
+  console.log('superAdminId:', superAdminId.toString());
+  console.log('telegramIdBigInt:', telegramIdBigInt.toString());
+  
+  let user = await getUserByTelegramId(telegramId);
+  
+  if (telegramIdBigInt === superAdminId) {
+    console.log('Пользователь является суперадмином');
+    if (!user) {
+      console.log('Создаем суперадмина в базе данных');
+      user = await createUser(telegramId, 'superadmin');
+    }
     return 'superadmin';
   }
 
-  const user = await getUserByTelegramId(telegramId);
-  if (!user) return null;
-
-  return user.role;
+  console.log('Результат проверки роли:', user?.role || null);
+  return user?.role || null;
 }
 
 async function getReferralStats(userId) {

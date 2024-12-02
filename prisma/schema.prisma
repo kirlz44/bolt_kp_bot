@@ -21,6 +21,7 @@ datasource db {
       transactions     Transaction[]
       bonuses          Bonus[]
       createdGames     Game[]
+      participatingGames Game[]   @relation("GameParticipants")
       createdEvents    Event[]    @relation("CreatedEvents")
       eventsParticipating Event[] @relation("ParticipatingEvents")
     }
@@ -70,6 +71,7 @@ datasource db {
       createdAt   DateTime @default(now())
 
       creator     User     @relation(fields: [creatorId], references: [id])
+      participants User[]  @relation("GameParticipants")
     }
 
     model Event {
