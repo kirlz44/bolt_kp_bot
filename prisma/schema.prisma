@@ -65,17 +65,21 @@ datasource db {
 
     model Transaction {
       id          Int      @id @default(autoincrement())
-      userId      Int
+      invId       Int      @default(autoincrement()) @unique
       amount      Float
-      type        String
       description String
-      status      String
+      status      String   @default("pending")
+      type        String
       createdAt   DateTime @default(now())
-
+      updatedAt   DateTime @updatedAt
+      userId      Int
+      productId   Int?
       user        User     @relation(fields: [userId], references: [id])
+      product     Product? @relation(fields: [productId], references: [id])
 
       @@index([userId])
       @@index([type])
+      @@index([productId])
     }
 
     model Bonus {
@@ -132,6 +136,7 @@ datasource db {
       imageId     String?
       createdAt   DateTime @default(now())
       updatedAt   DateTime @updatedAt
+      transactions Transaction[] // Добавляем обратную связь
     }
 
     model WheelPrize {

@@ -1,5 +1,6 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
+const { generatePaymentUrl } = require('../services/robokassa');  // Добавляем импорт
 
 // Добавляем в начало файла функцию getMenuKeyboard
 function getMenuKeyboard(userRole) {
@@ -541,6 +542,126 @@ module.exports = async (ctx) => {
         await require('./buyProductWithKurajiki')(ctx, buyProductId);
         break;
 
+      // Обработчик покупки товара за рубли
+      case /^buy_product_money_\d+$/.test(data):
+        try {
+          const productId = parseInt(data.split('_')[3]);
+          const telegramId = ctx.from.id;
+
+          // Сначала получаем пользователя из базы данных
+          const user = await prisma.user.findUnique({
+            where: { telegramId: BigInt(telegramId) }
+          });
+
+          if (!user) {
+            return ctx.reply('Пользователь не найден');
+          }
+
+          // Получаем информацию о товаре
+          const product = await prisma.product.findUnique({
+            where: { id: productId }
+          });
+
+          if (!product) {
+            return ctx.reply('Товар не найд��н');
+          }
+
+          if (product.stock <= 0) {
+            return ctx.reply('К сожалению, товар закончился');
+          }
+
+          // Создаем транзакцию в базе данных, используя правильный ID пользователя
+          const transaction = await prisma.transaction.create({
+            data: {
+              amount: product.priceRub,
+              description: product.name,
+              status: 'pending',
+              type: 'product_purchase',
+              userId: user.id,
+              productId: product.id
+            }
+          });
+
+          // Генерируем ссылку для оплаты
+          const isTestMode = process.env.ROBOKASSA_TEST_MODE === 'true';
+          const paymentUrl = generatePaymentUrl(
+            product.priceRub,
+            product.name,
+            transaction.id,
+            isTestMode
+          );
+
+          // Отправляем сообщение с ссылкой на оплату
+          await ctx.reply(
+            `Для оплаты товара "${product.name}" перейдите по ссылке:\n` +
+            `Сумма к оплате: ${product.priceRub}₽`, {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '💳 Оплатить', url: paymentUrl }],
+                  [{ text: '🔙 Вернуться к товару', callback_data: `view_product_${product.id}` }]
+                ]
+              }
+            }
+          );
+
+        } catch (error) {
+          console.error('Ошибка при покупке товара:', error);
+          await ctx.reply('Произошла ошибка при оформлении покупки. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
+      // Добавляем обработчик для просмотра товара
+      case /^view_product_\d+$/.test(data):
+        try {
+          const productId = parseInt(data.split('_')[2]);
+          
+          // Получаем информацию о товаре
+          const product = await prisma.product.findUnique({
+            where: { id: productId }
+          });
+
+          if (!product) {
+            return ctx.reply('Товар не найден');
+          }
+
+          // Формируем сообщение с информацией о товаре
+          let message = `📦 *${product.name}*\n\n`;
+          if (product.description) {
+            message += `📝 ${product.description}\n\n`;
+          }
+          message += `💰 Цена: ${product.priceRub}₽ / ${product.priceKur} куражиков\n`;
+          message += `📊 В наличии: ${product.stock} шт.\n`;
+
+          const keyboard = {
+            inline_keyboard: [
+              [
+                { text: '💳 Купить за рубли', callback_data: `buy_product_money_${product.id}` },
+                { text: '💎 Купить за куражики', callback_data: `buy_product_kurajiki_${product.id}` }
+              ],
+              [{ text: '🔙 Вернуться в маркетплейс', callback_data: 'marketplace' }]
+            ]
+          };
+
+          // Если есть изображение товара, отправляем его
+          if (product.imageId) {
+            await ctx.replyWithPhoto(product.imageId, {
+              caption: message,
+              parse_mode: 'Markdown',
+              reply_markup: keyboard
+            });
+          } else {
+            await ctx.reply(message, {
+              parse_mode: 'Markdown',
+              reply_markup: keyboard
+            });
+          }
+
+        } catch (error) {
+          console.error('Ошибка при просмотре товара:', error);
+          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+        }
+        break;
+
       // Обработчик подтверждения выдачи товара
       case /^product_given_\d+_\d+$/.test(data):
         try {
@@ -661,7 +782,7 @@ module.exports = async (ctx) => {
           });
           
           if (prizesToDelete.length === 0) {
-            return ctx.editMessageText('Нет активных призов для удаления', {
+            return ctx.editMessageText('Нет активных призов д��я удаления', {
               reply_markup: {
                 inline_keyboard: [
                   [{ text: '🔙 Назад', callback_data: 'manage_wheel' }]
@@ -855,8 +976,7 @@ module.exports = async (ctx) => {
                     [{ text: '💰 Заработать ещё', callback_data: 'earn' }]
                   ]
                 }
-              }
-            );
+            });
           } catch (error) {
             console.error('Ошибка при обработке userId:', error);
             console.error('Детали ошибки:', {
@@ -889,7 +1009,7 @@ module.exports = async (ctx) => {
             }
           );
 
-          // Уведомляем пользователя об отклонении поста
+          // Уведомляем пользователя об откло��ении поста
           await ctx.telegram.sendMessage(
             userId,
             '❌ К сожалению, ваш пост не прошел проверку.\n' +
@@ -897,7 +1017,7 @@ module.exports = async (ctx) => {
             {
               reply_markup: {
                 inline_keyboard: [
-                  [{ text: '🔄 Попробовать снова', callback_data: `post_${network}` }]
+                  [{ text: '🔄 Попр��бовать снова', callback_data: `post_${network}` }]
                 ]
               }
             }
@@ -924,7 +1044,7 @@ module.exports = async (ctx) => {
               listMessage += `📅 ${new Date(game.date).toLocaleDateString()}\n`;
               listMessage += `⏰ ${new Date(game.date).toLocaleTimeString()}\n`;
               listMessage += `📍 ${game.location}\n`;
-              listMessage += `💰 ${game.priceRub}₽ / ${game.priceKur} куражиков\n`;
+              listMessage += `💰 ${game.priceRub}₽ / ${game.priceKur} кура��иков\n`;
               listMessage += `👥 Мест: ${game.seats}\n\n`;
             });
           } else {
@@ -1080,7 +1200,7 @@ module.exports = async (ctx) => {
           // Сначала удаляем текущее сообщение
           await ctx.deleteMessage();
 
-          // Отправляем новое сообщение со списком игр
+          // Отправляем новое ��ообщение со списком игр
           await ctx.reply(deleteMessage, {
             parse_mode: 'Markdown',
             reply_markup: {
@@ -1088,7 +1208,7 @@ module.exports = async (ctx) => {
             }
           });
         } catch (error) {
-          console.error('Ошибка при выборе игры для удаления:', error);
+          console.error('Ошибка при выборе и��ры для удаления:', error);
           await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
         }
         break;
@@ -1152,7 +1272,7 @@ module.exports = async (ctx) => {
             }
           });
         } catch (error) {
-          console.error('Ошибка при удалении игры:', error);
+          console.error('��шибка при уда��ении игры:', error);
           await ctx.reply('Произошла ошибка при удалении игры. Пожалуйста, попробуйте позже.');
         }
         break;
@@ -1246,7 +1366,7 @@ module.exports = async (ctx) => {
             }
           });
         } catch (error) {
-          console.error('Ошибка при удалении мероприятия:', error);
+          console.error('Ошибка при удалении меро��риятия:', error);
           await ctx.reply('Произошла ошибка при удалении мероприятия. Пожалуйста, попробуйте позже.');
         }
         break;
@@ -1272,7 +1392,7 @@ module.exports = async (ctx) => {
               promptEventMessage = 'Введите новую дату и время в формате ДД.ММ.ГГГГ ЧЧ:ММ:';
               break;
             case 'location':
-              promptEventMessage = 'Введите новое место проведения:';
+              promptEventMessage = 'Введите новое место пров��дения:';
               break;
             case 'price':
               promptEventMessage = 'Введите новую цену в формате "РУБЛИ КУРАЖИКИ" или "0 0":';
@@ -1281,14 +1401,14 @@ module.exports = async (ctx) => {
               promptEventMessage = 'Введите новое количество мест:';
               break;
             case 'description':
-              promptEventMessage = 'Введите новое описание мероприятия:';
+              promptEventMessage = 'Введите ��овое описание мероприятия:';
               break;
           }
 
           await ctx.scene.enter('edit_event_scene', { promptMessage: promptEventMessage });
         } catch (error) {
           console.error('Ошибка при редактировании параметра мероприятия:', error);
-          await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте позже.');
+          await ctx.reply('Произ��шла ошибка. Пожалуйста, попробуйте позже.');
         }
         break;
 
@@ -1370,7 +1490,7 @@ module.exports = async (ctx) => {
             // Уведомляем админов
             await ctx.telegram.sendMessage(
               process.env.ADMIN_CHAT_ID,
-              `Новая регистрация на мероприятие!\n\n` +
+              `Новая регистрация на мероприят��е!\n\n` +
               `Мероприятие: ${eventRegister.title}\n` +
               `Участник: ${ctx.from.first_name} ${ctx.from.last_name || ''}\n` +
               `Username: @${ctx.from.username || 'отсутствует'}`
@@ -1444,20 +1564,20 @@ module.exports = async (ctx) => {
 
             try {
               // Списываем куражики и регистрируем участника
-              await prisma.$transaction([
-                prisma.user.update({
+              await prisma.$transaction(async (prisma) => {
+                await prisma.user.update({
                   where: { id: userPayment.id },
                   data: { balance: { decrement: eventPayment.priceKur } }
-                }),
-                prisma.event.update({
+                });
+                await prisma.event.update({
                   where: { id: eventPayment.id },
                   data: {
                     participants: {
                       connect: { id: userPayment.id }
                     }
                   }
-                })
-              ]);
+                });
+              });
 
               // Запрашиваем номер телефона
               await ctx.reply(
@@ -1494,9 +1614,22 @@ module.exports = async (ctx) => {
           } else {
             // Оплата через Robokassa
             const isTestMode = process.env.ROBOKASSA_TEST_MODE === 'true';
+
+            // Создаем транзакцию в базе данных
+            const transaction = await prisma.transaction.create({
+              data: {
+                amount: eventPayment.priceRub,
+                description: `Оплата участия в мероприятии: ${eventPayment.title}`,
+                status: 'pending',
+                type: 'event_registration',
+                userId: userPayment.id
+              }
+            });
+
             const paymentUrl = generatePaymentUrl(
               eventPayment.priceRub,
               `Оплата участия в мероприятии: ${eventPayment.title}`,
+              transaction.id,
               isTestMode
             );
 
@@ -1649,7 +1782,7 @@ module.exports = async (ctx) => {
           });
 
           if (eventsRegistrations.length === 0) {
-            await ctx.editMessageText('Нет созданных мероприятий', {
+            await ctx.editMessageText('Нет созданных мероприя��ий', {
               reply_markup: {
                 inline_keyboard: [
                   [{ text: '🔙 Назад', callback_data: 'manage_events' }]
@@ -2177,7 +2310,7 @@ module.exports = async (ctx) => {
         }
         break;
 
-      // Обработчик отмены регистрации на игру
+      // Обработчик отмены регис��рации на игру
       case /^cancel_game_registration_\d+$/.test(data):
         try {
           const gameIdCancelGame = parseInt(data.split('_')[3]);
@@ -2200,16 +2333,21 @@ module.exports = async (ctx) => {
             return ctx.reply('Игра или пользователь не найдены');
           }
 
-          // Отключаем пользователя от игры и возвращаем куражики
+          // Отключаем поль��ователя от игры и возвращаем куражики
           await prisma.$transaction([
             prisma.user.update({
               where: { id: userCancelGame.id },
-              data: { balance: { increment: gameCancelGame.priceKur }, participatingGames: { disconnect: { id: gameCancelGame.id } } }
+              data: { 
+                balance: { increment: gameCancelGame.priceKur }, 
+                participatingGames: { disconnect: { id: gameCancelGame.id } } 
+              }
             }),
             // Начисляем куражики создателю игры
             prisma.user.update({
               where: { id: gameCancelGame.creatorId },
-              data: { balance: { decrement: gameCancelGame.priceKur } }
+              data: { 
+                balance: { decrement: gameCancelGame.priceKur } 
+              }
             })
           ]);
 
