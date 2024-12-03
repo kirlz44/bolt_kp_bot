@@ -4,6 +4,8 @@ const authMiddleware = require('./middleware/auth');
 const { PrismaClient } = require('@prisma/client');
 const cron = require('node-cron');
 const { sendWeeklyReport, startScheduler } = require('./services/scheduler');
+const express = require('express');
+const { handlePaymentNotification } = require('./services/handleRobokassaResult');
 
 // Импорт сцен
 const uploadVideoScene = require('./scenes/uploadVideoScene');
@@ -205,6 +207,29 @@ bot.on('text', async (ctx) => {
 // Запускаем еженедельный отчет
 cron.schedule('0 7 * * 0', sendWeeklyReport, {
   timezone: 'Europe/Moscow'
+});
+
+// Создаем Express приложение для обработки уведомлений от Robokassa
+const app = express();
+app.use(express.urlencoded({ extended: true }));
+
+// Обработчик Result URL
+app.post('/robokassa/result', async (req, res) => {
+  console.log('Получено уведомление от Robokassa:', req.body);
+  
+  const success = await handlePaymentNotification(req.body, bot);
+  
+  if (success) {
+    res.send('OK' + req.body.InvId);
+  } else {
+    res.status(400).send('Failed');
+  }
+});
+
+// Запускаем Express сервер
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Сервер запущен на порту ${PORT}`);
 });
 
 // Запускаем бота
